@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: shotai-preview
+    runtime: docker
+    plan: free
+    region: singapore
+    rootDir: app
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: SHOTAI_API_HOST
+        value: 0.0.0.0
+      - key: RATE_LIMIT_MAX
+        value: 30
