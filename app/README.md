@@ -4,7 +4,7 @@ Shotai is an AI-assisted photography and color-grading workspace.
 
 ## Current Version
 
-V0.5 multi-image batch MVP:
+V1.0 production release:
 
 - Upload a target-style image and up to 20 user photos (200MB total).
 - Preview and manually adjust six color parameters in the browser.
@@ -93,3 +93,4 @@ npm run verify
 
 Production deployment files are documented in [DEPLOYMENT.md](./DEPLOYMENT.md).
 The current privacy behavior is summarized in [PRIVACY.md](./PRIVACY.md).
+Release history is documented in [CHANGELOG.md](./CHANGELOG.md).

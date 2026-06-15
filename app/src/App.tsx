@@ -473,7 +473,7 @@ function App() {
             <Aperture size={19} strokeWidth={2.2} />
           </span>
           <span>Shotai</span>
-          <span className="version-tag">V0.5</span>
+          <span className="version-tag">V1.0</span>
         </div>
         <p className="topbar-note">本地预览 · API Proxy 分析</p>
         <span className={`api-health ${apiHealth}`}>
