@@ -10,6 +10,7 @@ import {
   Grid2X2,
   History,
   ImageIcon,
+  LoaderCircle,
   Maximize2,
   RotateCcw,
   Server,
@@ -1018,8 +1019,8 @@ function App() {
                     <span className="panel-kicker">AI 调色建议</span>
                     <h2>生成后由你确认应用</h2>
                   </div>
-                  <span className="confidence-chip">
-                    {aiAnalysis ? `${Math.round(aiAnalysis.confidence * 100)}%` : '待分析'}
+                  <span className={`confidence-chip ${getColorAnalysisTone(analysisStatus, aiAnalysis)}`}>
+                    {getColorAnalysisLabel(analysisStatus, aiAnalysis)}
                   </span>
                 </div>
                 <div className="privacy-check">
@@ -1048,13 +1049,11 @@ function App() {
                   }
                 >
                   {analysisStatus === 'loading' ? (
-                    <AlertCircle size={17} />
+                    <LoaderCircle size={17} className="spin" />
                   ) : (
                     <WandSparkles size={17} />
                   )}
-                  {analysisStatus === 'loading'
-                    ? '取消分析'
-                    : 'AI 分析调色方案'}
+                  {getColorAnalysisButtonLabel(analysisStatus)}
                 </button>
                 {analysisStatus === 'error' && analysisError && (
                   <StatusMessage tone="error">{analysisError}</StatusMessage>
@@ -1385,6 +1384,32 @@ function formatApiHealth(health: ApiHealth) {
   if (health === 'degraded') return 'AI 未配置'
   if (health === 'offline') return 'API 离线'
   return '检查服务'
+}
+
+function getColorAnalysisLabel(
+  status: AnalysisStatus,
+  result: ColorAnalysisResult | null,
+) {
+  if (status === 'loading') return '分析中'
+  if (status === 'error') return '分析失败'
+  if (result) return `${Math.round(result.confidence * 100)}%`
+  return '待分析'
+}
+
+function getColorAnalysisTone(
+  status: AnalysisStatus,
+  result: ColorAnalysisResult | null,
+) {
+  if (status === 'loading') return 'loading'
+  if (status === 'error') return 'error'
+  if (result) return 'success'
+  return 'idle'
+}
+
+function getColorAnalysisButtonLabel(status: AnalysisStatus) {
+  if (status === 'loading') return '取消分析'
+  if (status === 'error') return '重新分析调色方案'
+  return 'AI 分析调色方案'
 }
 
 function scopeLabel(scope: ApplyScope) {

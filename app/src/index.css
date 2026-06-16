@@ -857,6 +857,24 @@ main {
   background: var(--accent-soft);
 }
 
+.confidence-chip.loading {
+  color: #76620f;
+  border-color: #e7d99c;
+  background: #fff8d8;
+}
+
+.confidence-chip.error {
+  color: var(--danger);
+  border-color: #e7c3bf;
+  background: #fff4f2;
+}
+
+.confidence-chip.success {
+  color: var(--accent-dark);
+  border-color: #bdded6;
+  background: var(--accent-soft);
+}
+
 .ai-result-card {
   margin-top: 10px;
   display: grid;
