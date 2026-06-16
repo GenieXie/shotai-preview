@@ -1,62 +1,151 @@
 import {
+  Aperture,
   Contrast,
+  Droplets,
+  Eye,
+  Focus,
+  Gauge,
   Moon,
   Palette,
+  RotateCcw,
+  Sparkles,
   Sun,
   SunDim,
   ThermometerSun,
 } from 'lucide-react'
 import {
-  ADJUSTMENT_CONFIG,
+  ADJUSTMENT_GROUPS,
+  DEFAULT_ADJUSTMENTS,
+  formatAdjustmentValue,
+  normalizeAdjustment,
   type AdjustmentKey,
   type AdjustmentValues,
 } from '../lib/imageAdjustments'
 
 const icons = {
+  exposure: Aperture,
   brightness: Sun,
   contrast: Contrast,
-  saturation: Palette,
-  temperature: ThermometerSun,
-  shadows: Moon,
   highlights: SunDim,
+  shadows: Moon,
+  whites: Eye,
+  blacks: Eye,
+  saturation: Palette,
+  vibrance: Sparkles,
+  temperature: ThermometerSun,
+  tint: Droplets,
+  clarity: Gauge,
+  dehaze: Droplets,
+  sharpness: Focus,
+  grain: Sparkles,
+  vignette: Aperture,
 }
 
 interface AdjustmentPanelProps {
   values: AdjustmentValues
+  aiValues?: AdjustmentValues | null
+  presetValues?: AdjustmentValues | null
+  canUndo: boolean
+  canRedo: boolean
   onChange: (values: AdjustmentValues) => void
+  onResetOne: (key: AdjustmentKey) => void
+  onResetAll: () => void
+  onRestoreAi: () => void
+  onRestorePreset: () => void
+  onUndo: () => void
+  onRedo: () => void
 }
 
-export function AdjustmentPanel({ values, onChange }: AdjustmentPanelProps) {
+export function AdjustmentPanel({
+  values,
+  aiValues,
+  presetValues,
+  canUndo,
+  canRedo,
+  onChange,
+  onResetOne,
+  onResetAll,
+  onRestoreAi,
+  onRestorePreset,
+  onUndo,
+  onRedo,
+}: AdjustmentPanelProps) {
   const updateValue = (key: AdjustmentKey, value: number) => {
-    onChange({ ...values, [key]: value })
+    onChange({ ...values, [key]: normalizeAdjustment(value) })
   }
 
   return (
-    <div className="adjustment-list">
-      {ADJUSTMENT_CONFIG.map(({ key, label }) => {
-        const Icon = icons[key]
-        return (
-          <label className="adjustment-row" key={key}>
-            <span className="adjustment-label">
-              <Icon size={16} />
-              {label}
-            </span>
-            <input
-              type="range"
-              min="-100"
-              max="100"
-              value={values[key]}
-              onChange={(event) => updateValue(key, Number(event.target.value))}
-            />
-            <output>{formatValue(values[key])}</output>
-          </label>
-        )
-      })}
-    </div>
-  )
-}
+    <section className="adjustment-panel">
+      <div className="adjustment-actions" aria-label="参数组操作">
+        <button type="button" onClick={onUndo} disabled={!canUndo}>
+          撤销
+        </button>
+        <button type="button" onClick={onRedo} disabled={!canRedo}>
+          重做
+        </button>
+        <button type="button" onClick={onResetAll}>
+          全部归零
+        </button>
+        <button type="button" onClick={onRestoreAi} disabled={!aiValues}>
+          恢复 AI
+        </button>
+        <button type="button" onClick={onRestorePreset} disabled={!presetValues}>
+          恢复预设
+        </button>
+      </div>
 
-function formatValue(value: number) {
-  if (value > 0) return `+${value}`
-  return String(value)
+      <div className="adjustment-list">
+        {ADJUSTMENT_GROUPS.map((group) => (
+          <details className="adjustment-group" key={group.id} open>
+            <summary>{group.label}</summary>
+            {group.adjustments.map(({ key, label, hint }) => {
+              const Icon = icons[key]
+              const isDirty = values[key] !== DEFAULT_ADJUSTMENTS[key]
+              return (
+                <label className="adjustment-row" key={key} title={hint}>
+                  <span className="adjustment-label">
+                    <Icon size={15} />
+                    <span>
+                      {label}
+                      <small>{hint}</small>
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min="-100"
+                    max="100"
+                    value={values[key]}
+                    onChange={(event) => updateValue(key, Number(event.target.value))}
+                  />
+                  <input
+                    className="adjustment-number"
+                    type="number"
+                    min="-100"
+                    max="100"
+                    value={values[key]}
+                    onChange={(event) => updateValue(key, Number(event.target.value))}
+                    aria-label={`${label}数值`}
+                  />
+                  <output>{formatAdjustmentValue(values[key])}</output>
+                  <button
+                    type="button"
+                    className="mini-icon-button"
+                    onClick={(event) => {
+                      event.preventDefault()
+                      onResetOne(key)
+                    }}
+                    disabled={!isDirty}
+                    aria-label={`重置${label}`}
+                    title={`重置${label}`}
+                  >
+                    <RotateCcw size={12} />
+                  </button>
+                </label>
+              )
+            })}
+          </details>
+        ))}
+      </div>
+    </section>
+  )
 }

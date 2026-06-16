@@ -4,14 +4,24 @@ Shotai is an AI-assisted photography and color-grading workspace.
 
 ## Current Version
 
-V1.0 production release:
+V2.0 high-fidelity workbench release:
 
 - Upload a target-style image and up to 20 user photos (200MB total).
-- Preview and manually adjust six color parameters in the browser.
-- Select any queued photo for preview and AI analysis.
-- Apply the same adjustments or preset to the whole batch.
-- Export the current image as JPG or download the processed batch as one ZIP.
-- Track per-image batch export progress and failures.
+- Use a desktop workbench layout with target image, current photo, preview,
+  queue, AI suggestions, presets, and manual controls visible together.
+- Preview every image with contain-fit display and open any image in a zoomable
+  large-image viewer.
+- Compare original and adjusted output with original, adjusted, side-by-side,
+  and split preview modes.
+- Manually adjust grouped V2 parameters with sliders, numeric inputs,
+  per-parameter reset, undo/redo, and AI/preset restore.
+- Generate structured AI color suggestions and apply them only after user
+  confirmation.
+- Select any queued photo for preview and AI analysis, apply adjustments to the
+  current, selected, or all photos, and mark per-photo overrides.
+- Export the current image as JPG, selected photos, successful photos, or the
+  whole batch as one ZIP.
+- Track per-image batch export progress, failures, and retry failed items.
 - Skip duplicate files and recover cleanly from partial processing failures.
 - Reject images above 40MP and warn about panoramas, low resolution, large
   files, PNG transparency, and possible wide-gamut color differences.

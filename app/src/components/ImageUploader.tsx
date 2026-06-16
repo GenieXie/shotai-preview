@@ -1,5 +1,5 @@
 import { useRef, useState, type ChangeEvent } from 'react'
-import { ImagePlus, Replace, Upload } from 'lucide-react'
+import { Eye, ImagePlus, Replace, Upload } from 'lucide-react'
 import { createImageAsset, type ImageAsset } from '../lib/imageAsset'
 
 interface ImageUploaderProps {
@@ -7,6 +7,7 @@ interface ImageUploaderProps {
   description: string
   image: ImageAsset | null
   onImageChange: (image: ImageAsset) => void
+  onPreview?: (image: ImageAsset) => void
   compact?: boolean
 }
 
@@ -15,6 +16,7 @@ export function ImageUploader({
   description,
   image,
   onImageChange,
+  onPreview,
   compact = false,
 }: ImageUploaderProps) {
   const inputRef = useRef<HTMLInputElement>(null)
@@ -44,15 +46,26 @@ export function ImageUploader({
           <p>{description}</p>
         </div>
         {image && (
-          <button
-            type="button"
-            className="icon-button"
-            onClick={() => inputRef.current?.click()}
-            title="更换图片"
-            aria-label={`更换${label}`}
-          >
-            <Replace size={17} />
-          </button>
+          <div className="upload-tools">
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => onPreview?.(image)}
+              title="查看大图"
+              aria-label={`查看${label}`}
+            >
+              <Eye size={17} />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => inputRef.current?.click()}
+              title="更换图片"
+              aria-label={`更换${label}`}
+            >
+              <Replace size={17} />
+            </button>
+          </div>
         )}
       </div>
 
@@ -68,14 +81,14 @@ export function ImageUploader({
         <button
           type="button"
           className="uploaded-image"
-          onClick={() => inputRef.current?.click()}
-          aria-label={`更换${label}`}
+          onClick={() => onPreview?.(image)}
+          aria-label={`查看${label}`}
         >
           <img src={image.url} alt={`${label}预览`} />
           <span className="image-meta">
             <strong>{image.file.name}</strong>
             <small>
-              {image.width} × {image.height} · {formatBytes(image.file.size)}
+              {image.width} x {image.height} · {formatBytes(image.file.size)}
             </small>
           </span>
         </button>

@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { Download, ImageIcon, LoaderCircle } from 'lucide-react'
+import {
+  Columns2,
+  Download,
+  Eye,
+  ImageIcon,
+  LoaderCircle,
+  PanelLeft,
+  SquareSplitHorizontal,
+} from 'lucide-react'
 import type { ImageAsset } from '../lib/imageAsset'
 import type { AdjustmentValues } from '../lib/imageAdjustments'
 import { processImageDataInWorker } from '../lib/adjustmentWorkerClient'
@@ -11,12 +19,23 @@ import {
 
 const MAX_RENDER_EDGE = 1800
 
+export type PreviewMode = 'adjusted' | 'original' | 'side-by-side' | 'split'
+
 interface CanvasPreviewProps {
   image: ImageAsset | null
   adjustments: AdjustmentValues
+  mode: PreviewMode
+  onModeChange: (mode: PreviewMode) => void
+  onPreview?: (image: ImageAsset) => void
 }
 
-export function CanvasPreview({ image, adjustments }: CanvasPreviewProps) {
+export function CanvasPreview({
+  image,
+  adjustments,
+  mode,
+  onModeChange,
+  onPreview,
+}: CanvasPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sourcePixelsRef = useRef<ImageData | null>(null)
   const [ready, setReady] = useState(false)
@@ -80,7 +99,7 @@ export function CanvasPreview({ image, adjustments }: CanvasPreviewProps) {
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [adjustments, image, sourceVersion])
+  }, [adjustments, image, mode, sourceVersion])
 
   const exportImage = async () => {
     if (!image || exporting) return
@@ -97,21 +116,36 @@ export function CanvasPreview({ image, adjustments }: CanvasPreviewProps) {
     <section className="preview-panel">
       <div className="preview-toolbar">
         <div>
-          <span className="panel-kicker">效果预览</span>
+          <span className="panel-kicker">主预览</span>
           <h2>{image ? image.file.name : '等待上传实拍照'}</h2>
         </div>
-        <button
-          type="button"
-          className="primary-button"
-          onClick={exportImage}
-          disabled={!ready || exporting}
-        >
-          {exporting ? <LoaderCircle size={17} className="spin" /> : <Download size={17} />}
-          {exporting ? '处理中...' : '导出 JPG'}
-        </button>
+        <div className="preview-actions">
+          <ViewButton mode="adjusted" active={mode === 'adjusted'} onClick={onModeChange} label="调整后" />
+          <ViewButton mode="original" active={mode === 'original'} onClick={onModeChange} label="原图" />
+          <ViewButton mode="side-by-side" active={mode === 'side-by-side'} onClick={onModeChange} label="并排" />
+          <ViewButton mode="split" active={mode === 'split'} onClick={onModeChange} label="分割" />
+          <button
+            type="button"
+            className="secondary-button icon-text"
+            onClick={() => image && onPreview?.(image)}
+            disabled={!image}
+          >
+            <Eye size={15} />
+            查看
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={exportImage}
+            disabled={!ready || exporting}
+          >
+            {exporting ? <LoaderCircle size={17} className="spin" /> : <Download size={17} />}
+            {exporting ? '处理中...' : '导出 JPG'}
+          </button>
+        </div>
       </div>
 
-      <div className="canvas-stage">
+      <div className={`canvas-stage mode-${mode}`}>
         {!image && (
           <div className="canvas-empty">
             <ImageIcon size={28} />
@@ -119,8 +153,66 @@ export function CanvasPreview({ image, adjustments }: CanvasPreviewProps) {
             <span>调节参数后，效果会实时显示在这里</span>
           </div>
         )}
-        <canvas ref={canvasRef} className={image ? 'visible' : ''} />
+        {image && mode === 'original' && (
+          <img className="preview-original" src={image.url} alt="原图预览" />
+        )}
+        {image && mode === 'side-by-side' && (
+          <div className="compare-pair">
+            <figure>
+              <img src={image.url} alt="原图" />
+              <figcaption>原图</figcaption>
+            </figure>
+            <figure>
+              <canvas ref={canvasRef} className="visible" />
+              <figcaption>调整后</figcaption>
+            </figure>
+          </div>
+        )}
+        {image && mode === 'split' && (
+          <div className="split-preview">
+            <img src={image.url} alt="原图" />
+            <div className="split-adjusted">
+              <canvas ref={canvasRef} className="visible" />
+            </div>
+            <span className="split-handle" aria-hidden="true" />
+            <span className="split-label before">原图</span>
+            <span className="split-label after">调整后</span>
+          </div>
+        )}
+        {mode === 'adjusted' && (
+          <canvas ref={canvasRef} className={image ? 'visible' : ''} />
+        )}
       </div>
     </section>
+  )
+}
+
+function ViewButton({
+  mode,
+  active,
+  label,
+  onClick,
+}: {
+  mode: PreviewMode
+  active: boolean
+  label: string
+  onClick: (mode: PreviewMode) => void
+}) {
+  const Icon =
+    mode === 'side-by-side'
+      ? Columns2
+      : mode === 'split'
+        ? SquareSplitHorizontal
+        : PanelLeft
+  return (
+    <button
+      type="button"
+      className={active ? 'view-button active' : 'view-button'}
+      onClick={() => onClick(mode)}
+      aria-pressed={active}
+    >
+      <Icon size={14} />
+      {label}
+    </button>
   )
 }

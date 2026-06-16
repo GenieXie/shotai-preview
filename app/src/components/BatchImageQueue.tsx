@@ -2,52 +2,84 @@ import { useRef, useState, type ChangeEvent } from 'react'
 import {
   CheckCircle,
   Download,
+  Eye,
   ImagePlus,
   LoaderCircle,
+  RotateCcw,
   Trash2,
   XCircle,
 } from 'lucide-react'
+import type { AdjustmentValues } from '../lib/imageAdjustments'
 import { createImageAsset, type ImageAsset } from '../lib/imageAsset'
 
 export const MAX_BATCH_IMAGES = 20
 export const MAX_BATCH_TOTAL_SIZE = 200 * 1024 * 1024
 
 export type BatchExportStatus = 'idle' | 'processing' | 'done' | 'error'
+export type BatchFilter = 'all' | 'selected' | 'customized' | 'error'
 
 export interface BatchImageItem {
   id: string
   asset: ImageAsset
+  selected: boolean
   exportStatus: BatchExportStatus
   exportError?: string
+  overrideAdjustments?: AdjustmentValues
 }
 
 interface BatchImageQueueProps {
   items: BatchImageItem[]
   selectedId: string | null
   exporting: boolean
+  exportMessage: string
+  filter: BatchFilter
+  onFilterChange: (filter: BatchFilter) => void
   onAdd: (assets: ImageAsset[]) => void
   onSelect: (id: string) => void
+  onToggleSelect: (id: string) => void
+  onSelectAll: () => void
+  onClearSelection: () => void
   onRemove: (id: string) => void
   onClear: () => void
   onExportAll: () => void
+  onExportSelected: () => void
+  onExportSuccessful: () => void
   onCancelExport: () => void
-  exportMessage: string
+  onRetryFailed: () => void
+  onPreview: (asset: ImageAsset) => void
 }
 
 export function BatchImageQueue({
   items,
   selectedId,
   exporting,
+  exportMessage,
+  filter,
+  onFilterChange,
   onAdd,
   onSelect,
+  onToggleSelect,
+  onSelectAll,
+  onClearSelection,
   onRemove,
   onClear,
   onExportAll,
+  onExportSelected,
+  onExportSuccessful,
   onCancelExport,
-  exportMessage,
+  onRetryFailed,
+  onPreview,
 }: BatchImageQueueProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [message, setMessage] = useState('')
+  const selectedCount = items.filter((item) => item.selected).length
+  const failedCount = items.filter((item) => item.exportStatus === 'error').length
+  const visibleItems = items.filter((item) => {
+    if (filter === 'selected') return item.selected
+    if (filter === 'customized') return !!item.overrideAdjustments
+    if (filter === 'error') return item.exportStatus === 'error'
+    return true
+  })
 
   const handleFiles = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = [...(event.target.files ?? [])]
@@ -104,8 +136,11 @@ export function BatchImageQueue({
     <section className="batch-panel">
       <div className="batch-heading">
         <div>
-          <span className="panel-kicker">批量队列</span>
-          <h2>我的实拍照 · {items.length}/{MAX_BATCH_IMAGES}</h2>
+          <span className="panel-kicker">图片队列</span>
+          <h2>
+            我的实拍照 · {items.length}/{MAX_BATCH_IMAGES}
+            {selectedCount ? ` · 已选 ${selectedCount}` : ''}
+          </h2>
         </div>
         <div className="batch-actions">
           <button
@@ -117,14 +152,45 @@ export function BatchImageQueue({
             <ImagePlus size={16} />
             添加图片
           </button>
+          <button type="button" className="secondary-button" onClick={onSelectAll} disabled={!items.length}>
+            全选
+          </button>
+          <button type="button" className="secondary-button" onClick={onClearSelection} disabled={!selectedCount}>
+            取消选择
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onRetryFailed}
+            disabled={!failedCount || exporting}
+          >
+            <RotateCcw size={15} />
+            重试失败
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onExportSuccessful}
+            disabled={!items.some((item) => item.exportStatus === 'done') || exporting}
+          >
+            仅成功项
+          </button>
           <button
             type="button"
             className="primary-button"
-            onClick={exporting ? onCancelExport : onExportAll}
-            disabled={!items.length}
+            onClick={exporting ? onCancelExport : onExportSelected}
+            disabled={!items.length || (!exporting && !selectedCount)}
           >
             {exporting ? <XCircle size={16} /> : <Download size={16} />}
-            {exporting ? '取消处理' : '批量导出 ZIP'}
+            {exporting ? '取消处理' : '导出选中'}
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onExportAll}
+            disabled={!items.length || exporting}
+          >
+            全部导出
           </button>
           <button
             type="button"
@@ -139,6 +205,19 @@ export function BatchImageQueue({
         </div>
       </div>
 
+      <div className="batch-filters" aria-label="图片筛选">
+        {(['all', 'selected', 'customized', 'error'] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            className={filter === value ? 'active' : ''}
+            onClick={() => onFilterChange(value)}
+          >
+            {filterLabel(value)}
+          </button>
+        ))}
+      </div>
+
       <input
         ref={inputRef}
         className="visually-hidden"
@@ -150,11 +229,24 @@ export function BatchImageQueue({
 
       {items.length ? (
         <div className="batch-list">
-          {items.map((item) => (
+          {visibleItems.map((item) => (
             <article
               key={item.id}
-              className={item.id === selectedId ? 'batch-item active' : 'batch-item'}
+              className={[
+                'batch-item',
+                item.id === selectedId ? 'active' : '',
+                item.selected ? 'checked' : '',
+                item.overrideAdjustments ? 'customized' : '',
+              ].join(' ')}
             >
+              <label className="batch-check">
+                <input
+                  type="checkbox"
+                  checked={item.selected}
+                  onChange={() => onToggleSelect(item.id)}
+                  aria-label={`选择 ${item.asset.file.name}`}
+                />
+              </label>
               <button
                 type="button"
                 className="batch-select"
@@ -165,10 +257,20 @@ export function BatchImageQueue({
                 <span>
                   <strong>{item.asset.file.name}</strong>
                   <small>
-                    {item.asset.width} × {item.asset.height}
+                    {item.asset.width} x {item.asset.height}
+                    {item.overrideAdjustments ? ' · 已自定义' : ''}
                     {item.asset.warnings.length ? ' · 有提示' : ''}
                   </small>
                 </span>
+              </button>
+              <button
+                type="button"
+                className="mini-icon-button"
+                onClick={() => onPreview(item.asset)}
+                title="查看大图"
+                aria-label={`查看 ${item.asset.file.name}`}
+              >
+                <Eye size={13} />
               </button>
               <ExportState status={item.exportStatus} error={item.exportError} />
               <button
@@ -192,7 +294,7 @@ export function BatchImageQueue({
         >
           <ImagePlus size={22} />
           <strong>选择多张实拍照</strong>
-          <span>最多 20 张，统一应用当前参数和预设</span>
+          <span>最多 20 张，可按当前、选中或全部图片同步参数</span>
         </button>
       )}
       {message && <p className="batch-message">{message}</p>}
@@ -223,4 +325,11 @@ function ExportState({
     return <XCircle size={15} className="batch-state error" aria-label={error ?? '导出失败'} />
   }
   return <span className="batch-state idle" aria-hidden="true" />
+}
+
+function filterLabel(filter: BatchFilter) {
+  if (filter === 'selected') return '已选'
+  if (filter === 'customized') return '已自定义'
+  if (filter === 'error') return '失败'
+  return '全部'
 }

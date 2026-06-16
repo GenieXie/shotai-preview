@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   applyAdjustments,
   DEFAULT_ADJUSTMENTS,
+  normalizeAdjustmentValues,
 } from '../src/lib/imageAdjustments.ts'
 import { getImageWarnings } from '../src/lib/imageAsset.ts'
 
@@ -17,6 +18,7 @@ test('adjustments clamp channel values and preserve alpha', () => {
   const data = new Uint8ClampedArray([250, 250, 250, 123])
   const imageData = { data } as ImageData
   applyAdjustments(imageData, {
+    ...DEFAULT_ADJUSTMENTS,
     brightness: 100,
     contrast: 100,
     saturation: 100,
@@ -28,6 +30,22 @@ test('adjustments clamp channel values and preserve alpha', () => {
   assert.ok(data[1] >= 0 && data[1] <= 255)
   assert.ok(data[2] >= 0 && data[2] <= 255)
   assert.equal(data[3], 123)
+})
+
+test('v2 adjustments normalize legacy six-parameter values', () => {
+  const adjustments = normalizeAdjustmentValues({
+    brightness: 12,
+    contrast: -9,
+    saturation: 120,
+    temperature: -120,
+    shadows: 8,
+    highlights: -6,
+  })
+  assert.equal(adjustments.brightness, 12)
+  assert.equal(adjustments.saturation, 100)
+  assert.equal(adjustments.temperature, -100)
+  assert.equal(adjustments.exposure, 0)
+  assert.equal(adjustments.vignette, 0)
 })
 
 test('image warnings identify panorama, low resolution, large file, and PNG', () => {
