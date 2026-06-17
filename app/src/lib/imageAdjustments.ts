@@ -108,6 +108,38 @@ export function normalizeAdjustmentValues(value: unknown): AdjustmentValues {
   return result
 }
 
+export function normalizeAiAdjustmentsForSafety(value: unknown): AdjustmentValues {
+  const scaled = mapAdjustments(normalizeAdjustmentValues(value), (amount) =>
+    Math.round(amount * 0.5),
+  )
+  const capped = { ...scaled }
+
+  capped.exposure = Math.min(capped.exposure, 18)
+  capped.brightness = Math.min(capped.brightness, 20)
+  capped.highlights = Math.min(capped.highlights, 15)
+  capped.whites = Math.min(capped.whites, 12)
+  capped.contrast = Math.min(capped.contrast, 25)
+  capped.saturation = Math.min(capped.saturation, 25)
+  capped.vibrance = Math.min(capped.vibrance, 25)
+  capped.clarity = Math.min(capped.clarity, 20)
+  capped.dehaze = Math.min(capped.dehaze, 20)
+  capped.sharpness = Math.min(capped.sharpness, 20)
+
+  const positiveHighlightDrivers = [
+    capped.exposure,
+    capped.brightness,
+    capped.highlights,
+    capped.whites,
+  ].filter((amount) => amount > 0).length
+
+  if (positiveHighlightDrivers >= 2) {
+    capped.highlights = Math.min(capped.highlights, Math.round(capped.highlights * 0.5))
+    capped.whites = Math.min(capped.whites, Math.round(capped.whites * 0.5))
+  }
+
+  return capped
+}
+
 export function mapAdjustments(
   adjustments: AdjustmentValues,
   mapper: (value: number, key: AdjustmentKey) => number,
@@ -139,18 +171,18 @@ export function applyAdjustments(
   const centerY = height / 2
   const maxDistance = Math.sqrt(centerX * centerX + centerY * centerY) || 1
 
-  const exposure = adjustments.exposure * 2.2
-  const brightness = adjustments.brightness * 1.3
+  const exposure = adjustments.exposure * 1.0
+  const brightness = adjustments.brightness * 0.7
   const contrastValue = adjustments.contrast + adjustments.clarity * 0.35 + adjustments.dehaze * 0.25
   const contrast = (259 * (contrastValue + 255)) / (255 * (259 - contrastValue))
   const saturation = 1 + adjustments.saturation / 120 + adjustments.vibrance / 180
   const temperature = adjustments.temperature * 0.72
   const tint = adjustments.tint * 0.48
-  const shadowAmount = adjustments.shadows * 1.25
-  const highlightAmount = adjustments.highlights * 1.25
-  const whites = adjustments.whites * 0.9
-  const blacks = adjustments.blacks * 0.9
-  const sharpness = adjustments.sharpness * 0.12
+  const shadowAmount = adjustments.shadows * 0.55
+  const highlightAmount = adjustments.highlights * 0.55
+  const whites = adjustments.whites * 0.35
+  const blacks = adjustments.blacks * 0.35
+  const sharpness = adjustments.sharpness * 0.04
   const grain = Math.max(0, adjustments.grain) * 0.18
   const vignette = adjustments.vignette * 0.9
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.1.0 - 2026-06-16
+
+Shotai V2.1 makes AI color transfer more conservative:
+
+- Scales AI-recommended adjustments before showing or applying them.
+- Caps positive exposure, brightness, highlights, whites, contrast, saturation,
+  vibrance, clarity, dehaze, and sharpness to prevent harsh output.
+- Further compresses highlights and whites when multiple brightening controls
+  are positive at the same time.
+- Reduces Canvas adjustment mapping strength for exposure, brightness,
+  highlights, shadows, whites, blacks, and sharpness.
+- Updates the Gemini color-analysis prompt to protect highlights, white walls,
+  snow, and skin tones, avoiding blown highlights and excessive contrast.
+
 ## 2.0.0 - 2026-06-16
 
 Shotai V2.0 rebuilds the editor around a high-fidelity photography workbench:

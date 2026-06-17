@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   applyAdjustments,
   DEFAULT_ADJUSTMENTS,
+  normalizeAiAdjustmentsForSafety,
   normalizeAdjustmentValues,
 } from '../src/lib/imageAdjustments.ts'
 import { getImageWarnings } from '../src/lib/imageAsset.ts'
@@ -46,6 +47,47 @@ test('v2 adjustments normalize legacy six-parameter values', () => {
   assert.equal(adjustments.temperature, -100)
   assert.equal(adjustments.exposure, 0)
   assert.equal(adjustments.vignette, 0)
+})
+
+test('ai adjustments are scaled and capped conservatively', () => {
+  const adjustments = normalizeAiAdjustmentsForSafety({
+    exposure: 80,
+    brightness: 80,
+    contrast: 80,
+    highlights: 80,
+    whites: 80,
+    saturation: 80,
+    vibrance: 80,
+    clarity: 80,
+    dehaze: 80,
+    sharpness: 80,
+    temperature: -31,
+  })
+
+  assert.equal(adjustments.exposure, 18)
+  assert.equal(adjustments.brightness, 20)
+  assert.equal(adjustments.contrast, 25)
+  assert.equal(adjustments.highlights, 8)
+  assert.equal(adjustments.whites, 6)
+  assert.equal(adjustments.saturation, 25)
+  assert.equal(adjustments.vibrance, 25)
+  assert.equal(adjustments.clarity, 20)
+  assert.equal(adjustments.dehaze, 20)
+  assert.equal(adjustments.sharpness, 20)
+  assert.equal(adjustments.temperature, -15)
+})
+
+test('ai highlight compression only affects stacked positive highlight drivers', () => {
+  const adjustments = normalizeAiAdjustmentsForSafety({
+    exposure: -20,
+    brightness: 0,
+    highlights: 20,
+    whites: 20,
+  })
+
+  assert.equal(adjustments.exposure, -10)
+  assert.equal(adjustments.highlights, 5)
+  assert.equal(adjustments.whites, 5)
 })
 
 test('image warnings identify panorama, low resolution, large file, and PNG', () => {

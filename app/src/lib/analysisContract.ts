@@ -1,6 +1,7 @@
 import {
   ADJUSTMENT_LABELS,
   DEFAULT_ADJUSTMENTS,
+  normalizeAiAdjustmentsForSafety,
   normalizeAdjustmentValues,
   type AdjustmentKey,
   type AdjustmentValues,
@@ -44,7 +45,7 @@ export function normalizeColorAnalysis(value: unknown): ColorAnalysisResult {
   }
 
   const record = value as Record<string, unknown>
-  const adjustments = normalizeAdjustmentValues(record.adjustments)
+  const adjustments = normalizeAiAdjustmentsForSafety(record.adjustments)
   const legacyExplanation =
     typeof record.explanation === 'string' ? record.explanation.trim() : ''
 
