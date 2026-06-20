@@ -951,7 +951,7 @@ function App() {
             <Aperture size={19} strokeWidth={2.2} />
           </span>
           <span>Shotai</span>
-          <span className="version-tag">V2.1</span>
+          <span className="version-tag">V2.2</span>
         </div>
         <nav className="global-nav" aria-label="全局导航">
           <button type="button" className={activeTab === 'before' ? 'active' : ''} onClick={() => setActiveTab('before')}>
