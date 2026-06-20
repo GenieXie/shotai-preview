@@ -2,9 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   applyAdjustments,
+  blendAdjustments,
   DEFAULT_ADJUSTMENTS,
+  detectPreviewRisks,
   normalizeAiAdjustmentsForSafety,
   normalizeAdjustmentValues,
+  resetAdjustmentGroup,
 } from '../src/lib/imageAdjustments.ts'
 import { getImageWarnings } from '../src/lib/imageAsset.ts'
 
@@ -96,4 +99,60 @@ test('image warnings identify panorama, low resolution, large file, and PNG', ()
   })
   const warnings = getImageWarnings(file, 700, 100)
   assert.equal(warnings.length, 4)
+})
+
+test('blendAdjustments applies AI strength from a stable base', () => {
+  const base = {
+    ...DEFAULT_ADJUSTMENTS,
+    exposure: 10,
+    saturation: -20,
+  }
+  const target = {
+    ...DEFAULT_ADJUSTMENTS,
+    exposure: 50,
+    saturation: 20,
+  }
+
+  assert.equal(blendAdjustments(base, target, 25).exposure, 20)
+  assert.equal(blendAdjustments(base, target, 50).saturation, 0)
+  assert.equal(blendAdjustments(base, target, 100).exposure, 50)
+})
+
+test('resetAdjustmentGroup only resets the requested group', () => {
+  const values = {
+    ...DEFAULT_ADJUSTMENTS,
+    exposure: 30,
+    contrast: -20,
+    saturation: 45,
+    sharpness: 25,
+  }
+  const reset = resetAdjustmentGroup(values, 'light')
+
+  assert.equal(reset.exposure, 0)
+  assert.equal(reset.contrast, 0)
+  assert.equal(reset.saturation, 45)
+  assert.equal(reset.sharpness, 25)
+})
+
+test('detectPreviewRisks identifies clipped highlights, crushed shadows, and saturated colors', () => {
+  const data = new Uint8ClampedArray([
+    255, 255, 255, 255,
+    0, 0, 0, 255,
+    255, 0, 0, 255,
+    120, 120, 120, 255,
+  ])
+  const risks = detectPreviewRisks(
+    { data } as ImageData,
+    {
+      ...DEFAULT_ADJUSTMENTS,
+      exposure: 20,
+      saturation: 20,
+      contrast: 20,
+    },
+  )
+
+  assert.deepEqual(
+    risks.map((risk) => risk.type),
+    ['highlights', 'shadows', 'saturation'],
+  )
 })

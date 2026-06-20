@@ -4,6 +4,8 @@ export interface AdjustmentConfigItem {
   hint: string
 }
 
+export type AdjustmentSource = 'manual' | 'ai' | 'preset' | 'mixed'
+
 export type AdjustmentKey =
   | 'exposure'
   | 'brightness'
@@ -23,7 +25,7 @@ export type AdjustmentKey =
   | 'vignette'
 
 export const ADJUSTMENT_GROUPS: {
-  id: string
+  id: AdjustmentGroupId
   label: string
   adjustments: AdjustmentConfigItem[]
 }[] = [
@@ -73,7 +75,17 @@ export const ADJUSTMENT_CONFIG = ADJUSTMENT_GROUPS.flatMap(
   (group) => group.adjustments,
 )
 
+export type AdjustmentGroupId = 'light' | 'color' | 'detail' | 'effects'
 export type AdjustmentValues = Record<AdjustmentKey, number>
+
+export type PreviewRiskType = 'highlights' | 'shadows' | 'saturation'
+
+export interface PreviewRisk {
+  type: PreviewRiskType
+  label: string
+  message: string
+  suggestion: string
+}
 
 export const DEFAULT_ADJUSTMENTS: AdjustmentValues = {
   exposure: 0,
@@ -149,6 +161,30 @@ export function mapAdjustments(
     result[key] = normalizeAdjustment(mapper(adjustments[key], key))
   }
   return result
+}
+
+export function blendAdjustments(
+  base: AdjustmentValues,
+  target: AdjustmentValues,
+  strength: number,
+): AdjustmentValues {
+  const ratio = Math.max(0, Math.min(100, strength)) / 100
+  return mapAdjustments(base, (value, key) =>
+    value + (target[key] - value) * ratio,
+  )
+}
+
+export function resetAdjustmentGroup(
+  values: AdjustmentValues,
+  groupId: AdjustmentGroupId,
+): AdjustmentValues {
+  const group = ADJUSTMENT_GROUPS.find((item) => item.id === groupId)
+  if (!group) return values
+  const next = { ...values }
+  for (const item of group.adjustments) {
+    next[item.key] = DEFAULT_ADJUSTMENTS[item.key]
+  }
+  return next
 }
 
 export function normalizeAdjustment(value: unknown) {
@@ -231,6 +267,72 @@ export function applyAdjustments(
     data[index + 1] = clamp(green + tonalShift + detailShift + grainShift + vignetteShift)
     data[index + 2] = clamp(blue + tonalShift + detailShift + grainShift + vignetteShift)
   }
+}
+
+export function detectPreviewRisks(
+  imageData: ImageData,
+  adjustments: AdjustmentValues,
+): PreviewRisk[] {
+  const data = imageData.data
+  const totalPixels = Math.max(1, data.length / 4)
+  let clippedHighlights = 0
+  let crushedShadows = 0
+  let saturatedPixels = 0
+
+  for (let index = 0; index < data.length; index += 4) {
+    const red = data[index]
+    const green = data[index + 1]
+    const blue = data[index + 2]
+    const luminance = 0.299 * red + 0.587 * green + 0.114 * blue
+    const max = Math.max(red, green, blue)
+    const min = Math.min(red, green, blue)
+
+    if (luminance >= 248 || (red >= 250 && green >= 250 && blue >= 250)) {
+      clippedHighlights += 1
+    }
+    if (luminance <= 7 || (red <= 6 && green <= 6 && blue <= 6)) {
+      crushedShadows += 1
+    }
+    if (max >= 245 && max - min >= 225) {
+      saturatedPixels += 1
+    }
+  }
+
+  const risks: PreviewRisk[] = []
+  if (clippedHighlights / totalPixels >= 0.08) {
+    risks.push({
+      type: 'highlights',
+      label: '高光风险',
+      message: '亮部接近死白。',
+      suggestion:
+        adjustments.exposure > 0 || adjustments.highlights > 0
+          ? '建议降低曝光或高光。'
+          : '建议检查高光或白色色阶。',
+    })
+  }
+  if (crushedShadows / totalPixels >= 0.08) {
+    risks.push({
+      type: 'shadows',
+      label: '阴影风险',
+      message: '暗部接近死黑。',
+      suggestion:
+        adjustments.shadows < 0 || adjustments.contrast > 0
+          ? '建议提升阴影或降低对比。'
+          : '建议检查阴影或黑色色阶。',
+    })
+  }
+  if (saturatedPixels / totalPixels >= 0.08) {
+    risks.push({
+      type: 'saturation',
+      label: '饱和风险',
+      message: '部分颜色可能断层。',
+      suggestion:
+        adjustments.saturation > 0 || adjustments.vibrance > 0
+          ? '建议降低饱和度或鲜艳度。'
+          : '建议微调色温或色调。',
+    })
+  }
+  return risks
 }
 
 function clamp(value: number) {

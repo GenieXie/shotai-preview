@@ -201,8 +201,14 @@ main {
   min-width: 0;
   height: 100%;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
+}
+
+.material-section {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
 }
 
 .reference-strip {
@@ -529,26 +535,72 @@ main {
   min-height: 0;
   padding: 14px;
   background: #242827;
-  display: grid;
-  place-items: center;
   overflow: hidden;
+  isolation: isolate;
 }
 
 .canvas-stage canvas {
-  display: none;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
 }
 
-.canvas-stage canvas.visible {
-  display: block;
-}
-
 .preview-original {
   max-width: 100%;
   max-height: 100%;
+}
+
+.preview-original-pane,
+.preview-adjusted-pane {
+  position: absolute;
+  inset: 14px;
+  min-width: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.preview-original-pane {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.preview-adjusted-pane {
+  z-index: 1;
+}
+
+.mode-original .preview-original-pane {
+  opacity: 1;
+}
+
+.mode-original .preview-adjusted-pane {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mode-side-by-side .preview-original-pane,
+.mode-side-by-side .preview-adjusted-pane {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.mode-side-by-side .preview-original-pane {
+  right: calc(50% + 5px);
+}
+
+.mode-side-by-side .preview-adjusted-pane {
+  left: calc(50% + 5px);
+}
+
+.mode-split .preview-original-pane,
+.mode-split .preview-adjusted-pane {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.mode-split .preview-adjusted-pane {
+  clip-path: inset(0 0 0 var(--split-percent));
 }
 
 .canvas-empty,
@@ -560,6 +612,11 @@ main {
   justify-content: center;
   gap: 8px;
   text-align: center;
+}
+
+.canvas-empty {
+  position: absolute;
+  inset: 0;
 }
 
 .compare-pair {
@@ -596,6 +653,17 @@ main {
   background: rgba(0, 0, 0, 0.5);
   font-size: 11px;
   font-weight: 800;
+  display: none;
+}
+
+.preview-adjusted-pane .split-label {
+  left: auto;
+  right: 10px;
+}
+
+.mode-side-by-side .split-label,
+.mode-split .split-label {
+  display: block;
 }
 
 .split-preview {
@@ -626,15 +694,79 @@ main {
   position: absolute;
   top: 10%;
   bottom: 10%;
-  left: 50%;
+  left: var(--split-percent);
   width: 2px;
+  z-index: 3;
   background: white;
+  cursor: ew-resize;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2);
 }
 
 .split-label.after {
   left: auto;
   right: 10px;
+}
+
+.preview-status,
+.preview-risks {
+  position: absolute;
+  z-index: 4;
+}
+
+.preview-status {
+  right: 12px;
+  bottom: 12px;
+  min-height: 26px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  color: #e7ece9;
+  background: rgba(15, 18, 17, 0.72);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 800;
+  backdrop-filter: blur(8px);
+}
+
+.preview-status.ready {
+  color: #d8f2eb;
+}
+
+.preview-status.loading {
+  color: #fff0bf;
+}
+
+.preview-status.error {
+  color: #ffd3cf;
+}
+
+.preview-risks {
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.risk-badge {
+  padding: 5px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: 6px;
+  color: white;
+  background: rgba(137, 82, 22, 0.82);
+  font-size: 10px;
+  font-weight: 900;
+  backdrop-filter: blur(8px);
+}
+
+.risk-badge.shadows {
+  background: rgba(63, 70, 82, 0.86);
+}
+
+.risk-badge.saturation {
+  background: rgba(139, 50, 78, 0.84);
 }
 
 .batch-panel {
@@ -692,8 +824,13 @@ main {
 
 .batch-item.active,
 .batch-item.checked,
-.batch-item.customized {
+.batch-item.customized,
+.batch-item.analysis-loading {
   border-color: var(--accent);
+}
+
+.batch-item.analysis-error {
+  border-color: var(--danger);
 }
 
 .batch-check input {
@@ -741,6 +878,29 @@ main {
 .batch-select small {
   color: var(--muted);
   font-size: 9px;
+}
+
+.batch-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.batch-tags em {
+  max-width: 72px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 800;
 }
 
 .batch-state {
@@ -945,10 +1105,66 @@ main {
   background: var(--accent);
 }
 
-.local-analysis {
-  margin-top: 10px;
+.ai-strength-card {
   display: grid;
   gap: 8px;
+}
+
+.ai-strength-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.ai-strength-actions button,
+.ai-timeout-actions button,
+.analysis-error-box button {
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.ai-strength-actions button.active {
+  border-color: var(--accent);
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+}
+
+.ai-strength-slider {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent-dark);
+  font-size: 11px;
+}
+
+.ai-strength-slider input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.ai-timeout-actions,
+.analysis-error-box {
+  margin-top: 8px;
+  display: grid;
+  gap: 7px;
+}
+
+.ai-timeout-actions > div {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.analysis-error-box small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
 }
 
 .adjustment-panel {
@@ -981,15 +1197,31 @@ main {
 .adjustment-group summary {
   padding: 10px 0 6px;
   color: var(--accent-dark);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 11px;
   font-weight: 900;
+  cursor: pointer;
+}
+
+.adjustment-group summary button {
+  height: 24px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  background: white;
+  font-size: 9px;
+  font-weight: 800;
   cursor: pointer;
 }
 
 .adjustment-row {
   min-height: 54px;
   display: grid;
-  grid-template-columns: 86px minmax(0, 1fr) 54px 38px 28px;
+  grid-template-columns: 86px minmax(0, 1fr) 54px 28px;
   align-items: center;
   gap: 7px;
 }
@@ -1027,16 +1259,6 @@ main {
   border-radius: 5px;
   text-align: center;
   font-size: 10px;
-}
-
-.adjustment-row output {
-  min-width: 34px;
-  padding: 3px;
-  border-radius: 4px;
-  color: #4d5653;
-  background: #f0f2f0;
-  font-size: 10px;
-  text-align: center;
 }
 
 .preset-heading {

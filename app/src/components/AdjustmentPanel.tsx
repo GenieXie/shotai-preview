@@ -16,8 +16,8 @@ import {
 import {
   ADJUSTMENT_GROUPS,
   DEFAULT_ADJUSTMENTS,
-  formatAdjustmentValue,
   normalizeAdjustment,
+  type AdjustmentGroupId,
   type AdjustmentKey,
   type AdjustmentValues,
 } from '../lib/imageAdjustments'
@@ -49,6 +49,7 @@ interface AdjustmentPanelProps {
   canRedo: boolean
   onChange: (values: AdjustmentValues) => void
   onResetOne: (key: AdjustmentKey) => void
+  onResetGroup: (groupId: AdjustmentGroupId) => void
   onResetAll: () => void
   onRestoreAi: () => void
   onRestorePreset: () => void
@@ -64,6 +65,7 @@ export function AdjustmentPanel({
   canRedo,
   onChange,
   onResetOne,
+  onResetGroup,
   onResetAll,
   onRestoreAi,
   onRestorePreset,
@@ -97,7 +99,18 @@ export function AdjustmentPanel({
       <div className="adjustment-list">
         {ADJUSTMENT_GROUPS.map((group) => (
           <details className="adjustment-group" key={group.id} open>
-            <summary>{group.label}</summary>
+            <summary>
+              <span>{group.label}</span>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.preventDefault()
+                  onResetGroup(group.id)
+                }}
+              >
+                重置本组
+              </button>
+            </summary>
             {group.adjustments.map(({ key, label, hint }) => {
               const Icon = icons[key]
               const isDirty = values[key] !== DEFAULT_ADJUSTMENTS[key]
@@ -126,7 +139,6 @@ export function AdjustmentPanel({
                     onChange={(event) => updateValue(key, Number(event.target.value))}
                     aria-label={`${label}数值`}
                   />
-                  <output>{formatAdjustmentValue(values[key])}</output>
                   <button
                     type="button"
                     className="mini-icon-button"

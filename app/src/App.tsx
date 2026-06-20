@@ -28,19 +28,33 @@ import {
   type BatchFilter,
   type BatchImageItem,
 } from './components/BatchImageQueue'
-import { CanvasPreview, type PreviewMode } from './components/CanvasPreview'
+import {
+  CanvasPreview,
+  type PreviewMode,
+  type PreviewRenderStatus,
+} from './components/CanvasPreview'
 import { ImageUploader } from './components/ImageUploader'
 import { PresetPanel } from './components/PresetPanel'
 import {
   ADJUSTMENT_LABELS,
+  blendAdjustments,
   DEFAULT_ADJUSTMENTS,
   formatAdjustmentValue,
   normalizeAdjustmentValues,
+  resetAdjustmentGroup,
+  type AdjustmentGroupId,
   type AdjustmentKey,
+  type AdjustmentSource,
   type AdjustmentValues,
+  type PreviewRisk,
 } from './lib/imageAdjustments'
-import { colorAnalysis } from './lib/mockAnalysis'
-import { analyzeBeforeShoot, analyzeColorMatch, getApiHealth } from './lib/analysisApi'
+import {
+  AnalysisApiError,
+  analyzeBeforeShoot,
+  analyzeColorMatch,
+  getApiHealth,
+  type AnalysisErrorCode,
+} from './lib/analysisApi'
 import type {
   BeforeAnalysisResult,
   ColorAnalysisResult,
@@ -71,6 +85,7 @@ type ApplyScope = 'current' | 'selected' | 'all'
 
 const SESSION_STORAGE_KEY = 'shotai.session.v2'
 const MAX_SESSION_IMAGE_BYTES = 4 * 1024 * 1024
+const AI_SOFT_TIMEOUT_MS = 18_000
 
 interface LightboxState {
   image: ImageAsset
@@ -89,6 +104,7 @@ interface StoredBatchImageItem {
   asset: StoredImageAsset
   selected: boolean
   overrideAdjustments?: AdjustmentValues
+  adjustmentSource?: AdjustmentSource
 }
 
 interface StoredSession {
@@ -99,6 +115,7 @@ interface StoredSession {
   batchImages: StoredBatchImageItem[]
   selectedImageId: string | null
   globalAdjustments: AdjustmentValues
+  globalAdjustmentSource?: AdjustmentSource | null
   applyScope: ApplyScope
   activePresetId: string | null
   presetStrength: number
@@ -152,6 +169,8 @@ function App() {
   const [apiHealth, setApiHealth] = useState<ApiHealth>('checking')
   const [globalAdjustments, setGlobalAdjustments] =
     useState<AdjustmentValues>(DEFAULT_ADJUSTMENTS)
+  const [globalAdjustmentSource, setGlobalAdjustmentSource] =
+    useState<AdjustmentSource | null>(null)
   const [applyScope, setApplyScope] = useState<ApplyScope>('current')
   const [historyPast, setHistoryPast] = useState<AdjustmentValues[]>([])
   const [historyFuture, setHistoryFuture] = useState<AdjustmentValues[]>([])
@@ -166,8 +185,12 @@ function App() {
   const [beforePrivacyAccepted, setBeforePrivacyAccepted] = useState(false)
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>('idle')
   const [analysisError, setAnalysisError] = useState('')
+  const [analysisErrorCode, setAnalysisErrorCode] =
+    useState<AnalysisErrorCode | null>(null)
+  const [analysisSoftTimedOut, setAnalysisSoftTimedOut] = useState(false)
   const [aiAnalysis, setAiAnalysis] = useState<ColorAnalysisResult | null>(null)
   const [aiSnapshot, setAiSnapshot] = useState<AdjustmentValues | null>(null)
+  const [aiApplyStrength, setAiApplyStrength] = useState(100)
   const [beforeStatus, setBeforeStatus] = useState<AnalysisStatus>('idle')
   const [beforeError, setBeforeError] = useState('')
   const [beforeResult, setBeforeResult] = useState<BeforeAnalysisResult | null>(
@@ -175,6 +198,9 @@ function App() {
   )
   const [beforeCopied, setBeforeCopied] = useState(false)
   const [previewMode, setPreviewMode] = useState<PreviewMode>('adjusted')
+  const [previewStatus, setPreviewStatus] =
+    useState<PreviewRenderStatus>('idle')
+  const [previewRisks, setPreviewRisks] = useState<PreviewRisk[]>([])
   const [lightbox, setLightbox] = useState<LightboxState | null>(null)
   const [sessionMessage, setSessionMessage] = useState('')
   const imagesRef = useRef({
@@ -185,6 +211,8 @@ function App() {
   const sessionHydratedRef = useRef(false)
   const sessionImageCacheRef = useRef(new Map<string, string>())
   const colorAnalysisControllerRef = useRef<AbortController | null>(null)
+  const colorAnalysisRequestRef = useRef(0)
+  const colorAnalysisSoftTimeoutRef = useRef<number | null>(null)
   const beforeAnalysisControllerRef = useRef<AbortController | null>(null)
   const batchExportControllerRef = useRef<AbortController | null>(null)
 
@@ -193,6 +221,8 @@ function App() {
   const userImage = currentItem?.asset ?? null
   const currentAdjustments =
     currentItem?.overrideAdjustments ?? globalAdjustments
+  const currentAdjustmentSource =
+    currentItem?.adjustmentSource ?? globalAdjustmentSource
   const activePreset = [...BUILT_IN_PRESETS, ...customPresets].find(
     (preset) => preset.id === activePresetId,
   )
@@ -216,6 +246,9 @@ function App() {
       if (before) URL.revokeObjectURL(before.url)
       if (target) URL.revokeObjectURL(target.url)
       batch.forEach((item) => URL.revokeObjectURL(item.asset.url))
+      if (colorAnalysisSoftTimeoutRef.current) {
+        window.clearTimeout(colorAnalysisSoftTimeoutRef.current)
+      }
     }
   }, [])
 
@@ -255,6 +288,7 @@ function App() {
             overrideAdjustments: item.overrideAdjustments
               ? normalizeAdjustmentValues(item.overrideAdjustments)
               : undefined,
+            adjustmentSource: item.adjustmentSource,
             exportStatus: 'idle',
           })
         }
@@ -275,6 +309,7 @@ function App() {
             : nextBatchImages[0]?.id ?? null,
         )
         setGlobalAdjustments(normalizeAdjustmentValues(stored.globalAdjustments))
+        setGlobalAdjustmentSource(stored.globalAdjustmentSource ?? null)
         setApplyScope(stored.applyScope)
         setActivePresetId(stored.activePresetId)
         setPresetStrength(stored.presetStrength)
@@ -334,6 +369,7 @@ function App() {
               asset,
               selected: item.selected,
               overrideAdjustments: item.overrideAdjustments,
+              adjustmentSource: item.adjustmentSource,
             })
           }
 
@@ -345,6 +381,7 @@ function App() {
             batchImages: storedBatchImages,
             selectedImageId,
             globalAdjustments,
+            globalAdjustmentSource,
             applyScope,
             activePresetId,
             presetStrength,
@@ -373,6 +410,7 @@ function App() {
     beforeImage,
     beforeResult,
     globalAdjustments,
+    globalAdjustmentSource,
     persistImage,
     presetStrength,
     previewMode,
@@ -404,7 +442,13 @@ function App() {
     setAiAnalysis(null)
     setAiSnapshot(null)
     setAnalysisError('')
+    setAnalysisErrorCode(null)
+    setAnalysisSoftTimedOut(false)
     setAnalysisStatus('idle')
+    if (colorAnalysisSoftTimeoutRef.current) {
+      window.clearTimeout(colorAnalysisSoftTimeoutRef.current)
+      colorAnalysisSoftTimeoutRef.current = null
+    }
   }
 
   const clearBeforeAnalysis = () => {
@@ -421,17 +465,24 @@ function App() {
 
   const applyAdjustmentsToScope = (
     next: AdjustmentValues,
-    options: { recordHistory?: boolean; scope?: ApplyScope } = {},
+    options: {
+      recordHistory?: boolean
+      scope?: ApplyScope
+      source?: AdjustmentSource | null
+    } = {},
   ) => {
     const scope = options.scope ?? applyScope
+    const source = options.source ?? currentAdjustmentSource
     if (options.recordHistory !== false) remember()
 
     if (scope === 'all') {
       setGlobalAdjustments(next)
+      setGlobalAdjustmentSource(source)
       setBatchImages((current) =>
         current.map((item) => ({
           ...item,
           overrideAdjustments: undefined,
+          adjustmentSource: undefined,
         })),
       )
       return
@@ -441,7 +492,7 @@ function App() {
       setBatchImages((current) =>
         current.map((item) =>
           item.selected
-            ? { ...item, overrideAdjustments: next }
+            ? { ...item, overrideAdjustments: next, adjustmentSource: source ?? undefined }
             : item,
         ),
       )
@@ -450,13 +501,14 @@ function App() {
 
     if (!selectedImageId) {
       setGlobalAdjustments(next)
+      setGlobalAdjustmentSource(source)
       return
     }
 
     setBatchImages((current) =>
       current.map((item) =>
         item.id === selectedImageId
-          ? { ...item, overrideAdjustments: next }
+          ? { ...item, overrideAdjustments: next, adjustmentSource: source ?? undefined }
           : item,
       ),
     )
@@ -599,7 +651,7 @@ function App() {
   }
 
   const resetAdjustments = () => {
-    applyAdjustmentsToScope(DEFAULT_ADJUSTMENTS)
+    applyAdjustmentsToScope(DEFAULT_ADJUSTMENTS, { source: null })
     setActivePresetId(null)
     setPresetModified(false)
     setPresetMessage('已重置当前作用范围的调色参数。')
@@ -609,12 +661,20 @@ function App() {
     applyAdjustmentsToScope({
       ...currentAdjustments,
       [key]: DEFAULT_ADJUSTMENTS[key],
-    })
+    }, { source: getManualSource(currentAdjustmentSource) })
+    if (activePresetId) setPresetModified(true)
+  }
+
+  const resetGroupAdjustments = (groupId: AdjustmentGroupId) => {
+    applyAdjustmentsToScope(
+      resetAdjustmentGroup(currentAdjustments, groupId),
+      { source: getManualSource(currentAdjustmentSource) },
+    )
     if (activePresetId) setPresetModified(true)
   }
 
   const updateAdjustments = (next: AdjustmentValues) => {
-    applyAdjustmentsToScope(next)
+    applyAdjustmentsToScope(next, { source: getManualSource(currentAdjustmentSource) })
     if (activePresetId) setPresetModified(true)
   }
 
@@ -623,7 +683,11 @@ function App() {
     if (!previous) return
     setHistoryPast((current) => current.slice(0, -1))
     setHistoryFuture((current) => [currentAdjustments, ...current].slice(0, 50))
-    applyAdjustmentsToScope(previous, { recordHistory: false, scope: 'current' })
+    applyAdjustmentsToScope(previous, {
+      recordHistory: false,
+      scope: 'current',
+      source: getManualSource(currentAdjustmentSource),
+    })
   }
 
   const redoAdjustments = () => {
@@ -631,14 +695,18 @@ function App() {
     if (!next) return
     setHistoryFuture((current) => current.slice(1))
     setHistoryPast((current) => [...current.slice(-49), currentAdjustments])
-    applyAdjustmentsToScope(next, { recordHistory: false, scope: 'current' })
+    applyAdjustmentsToScope(next, {
+      recordHistory: false,
+      scope: 'current',
+      source: getManualSource(currentAdjustmentSource),
+    })
   }
 
   const applyPreset = (preset: StylePreset) => {
     setActivePresetId(preset.id)
     setPresetStrength(100)
     setPresetModified(false)
-    applyAdjustmentsToScope(preset.adjustments)
+    applyAdjustmentsToScope(preset.adjustments, { source: 'preset' })
     setPresetMessage(`已应用“${preset.name}”到${scopeLabel(applyScope)}。`)
   }
 
@@ -649,7 +717,9 @@ function App() {
     if (!preset) return
     setPresetStrength(strength)
     setPresetModified(false)
-    applyAdjustmentsToScope(applyPresetStrength(preset.adjustments, strength))
+    applyAdjustmentsToScope(applyPresetStrength(preset.adjustments, strength), {
+      source: 'preset',
+    })
   }
 
   const savePreset = (name: string) => {
@@ -713,39 +783,84 @@ function App() {
     }
   }
 
-  const runColorAnalysis = async () => {
+  const clearColorSoftTimeout = () => {
+    if (colorAnalysisSoftTimeoutRef.current) {
+      window.clearTimeout(colorAnalysisSoftTimeoutRef.current)
+      colorAnalysisSoftTimeoutRef.current = null
+    }
+  }
+
+  const scheduleColorSoftTimeout = () => {
+    clearColorSoftTimeout()
+    colorAnalysisSoftTimeoutRef.current = window.setTimeout(() => {
+      setAnalysisSoftTimedOut(true)
+    }, AI_SOFT_TIMEOUT_MS)
+  }
+
+  const setCurrentImageAnalysisStatus = (
+    status: BatchImageItem['analysisStatus'],
+  ) => {
+    if (!selectedImageId) return
+    setBatchImages((current) =>
+      current.map((item) =>
+        item.id === selectedImageId ? { ...item, analysisStatus: status } : item,
+      ),
+    )
+  }
+
+  const runColorAnalysis = async (options: { restart?: boolean } = {}) => {
     if (!targetImage || !userImage) {
       setAnalysisStatus('error')
       setAnalysisError('请先上传目标风格照和我的实拍照。')
+      setAnalysisErrorCode('invalid-image')
       return
     }
 
     if (!privacyAccepted) {
       setAnalysisStatus('error')
       setAnalysisError('请先确认图片会发送到本地 API proxy 并转发给 Gemini API。')
+      setAnalysisErrorCode('configuration')
       return
     }
 
+    if (options.restart) {
+      colorAnalysisControllerRef.current?.abort()
+    }
+
+    const requestId = colorAnalysisRequestRef.current + 1
+    colorAnalysisRequestRef.current = requestId
     setAnalysisStatus('loading')
     setAnalysisError('')
+    setAnalysisErrorCode(null)
+    setAnalysisSoftTimedOut(false)
+    setAiApplyStrength(100)
     setAiSnapshot(currentAdjustments)
+    setCurrentImageAnalysisStatus('loading')
+    scheduleColorSoftTimeout()
     const controller = new AbortController()
     colorAnalysisControllerRef.current = controller
 
     try {
       const result = await analyzeColorMatch(targetImage, userImage, controller.signal)
+      if (colorAnalysisRequestRef.current !== requestId) return
       setAiAnalysis(result)
       setAnalysisStatus('success')
+      setAnalysisSoftTimedOut(false)
+      setCurrentImageAnalysisStatus('success')
       setPresetMessage('AI 建议已生成，点击“应用建议”后才会写入参数。')
     } catch (error) {
+      if (colorAnalysisRequestRef.current !== requestId) return
+      const apiError = normalizeAnalysisError(error)
       setAnalysisStatus('error')
-      setAnalysisError(
-        error instanceof Error
-          ? error.message
-          : 'AI 调色分析失败，请稍后重试。',
-      )
+      setAnalysisSoftTimedOut(false)
+      setAnalysisError(apiError.message)
+      setAnalysisErrorCode(apiError.code)
+      setCurrentImageAnalysisStatus('error')
     } finally {
-      colorAnalysisControllerRef.current = null
+      if (colorAnalysisRequestRef.current === requestId) {
+        clearColorSoftTimeout()
+        colorAnalysisControllerRef.current = null
+      }
     }
   }
 
@@ -753,17 +868,35 @@ function App() {
     colorAnalysisControllerRef.current?.abort()
   }
 
+  const continueColorAnalysis = () => {
+    setAnalysisSoftTimedOut(false)
+    scheduleColorSoftTimeout()
+  }
+
+  const retryColorAnalysis = () => {
+    void runColorAnalysis({ restart: true })
+  }
+
   const applyAiSuggestion = () => {
     if (!aiAnalysis) return
-    applyAdjustmentsToScope(aiAnalysis.adjustments)
+    applyAdjustmentsToScope(
+      blendAdjustments(
+        aiSnapshot ?? currentAdjustments,
+        aiAnalysis.adjustments,
+        aiApplyStrength,
+      ),
+      { source: 'ai' },
+    )
     setActivePresetId(null)
     setPresetModified(false)
-    setPresetMessage(`已应用 AI 推荐参数到${scopeLabel(applyScope)}。`)
+    setPresetMessage(
+      `已按 ${aiApplyStrength}% 强度应用 AI 推荐参数到${scopeLabel(applyScope)}。`,
+    )
   }
 
   const restoreAiSnapshot = () => {
     if (!aiSnapshot) return
-    applyAdjustmentsToScope(aiSnapshot)
+    applyAdjustmentsToScope(aiSnapshot, { source: null })
     setPresetMessage('已恢复 AI 分析前的参数。')
   }
 
@@ -887,89 +1020,95 @@ function App() {
         ) : (
           <section className="v2-workbench">
             <div className="workbench-main">
-              <div className="reference-strip">
-                <ImageUploader
-                  compact
-                  label="目标风格照"
-                  description="用于记录你想靠近的视觉方向"
-                  image={targetImage}
-                  onPreview={(image) => setLightbox({ image, title: '目标风格照' })}
-                  onImageChange={(next) => {
-                    replaceImage(targetImage, setTargetImage)(next)
+              <div className="material-section">
+                <div className="reference-strip">
+                  <ImageUploader
+                    compact
+                    label="目标风格照"
+                    description="用于记录你想靠近的视觉方向"
+                    image={targetImage}
+                    onPreview={(image) => setLightbox({ image, title: '目标风格照' })}
+                    onImageChange={(next) => {
+                      replaceImage(targetImage, setTargetImage)(next)
+                      clearColorAnalysis()
+                    }}
+                  />
+                  <div className="current-card">
+                    <span className="panel-kicker">当前实拍</span>
+                    {userImage ? (
+                      <button
+                        type="button"
+                        className="current-preview"
+                        onClick={() => setLightbox({ image: userImage, title: '当前实拍照' })}
+                      >
+                        <img src={userImage.url} alt="当前实拍照" />
+                        <span>
+                          <strong>{userImage.file.name}</strong>
+                          <small>
+                            {userImage.width} x {userImage.height}
+                            {currentAdjustmentSource ? ` · ${sourceLabel(currentAdjustmentSource)}` : ''}
+                          </small>
+                        </span>
+                      </button>
+                    ) : (
+                      <div className="current-empty">
+                        <ImageIcon size={22} />
+                        <span>从图片队列选择一张实拍照</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <BatchImageQueue
+                  items={batchImages}
+                  selectedId={selectedImageId}
+                  exporting={batchExporting}
+                  filter={batchFilter}
+                  onFilterChange={setBatchFilter}
+                  onAdd={addBatchImages}
+                  onSelect={(id) => {
+                    setSelectedImageId(id)
                     clearColorAnalysis()
                   }}
+                  onToggleSelect={(id) =>
+                    setBatchImages((current) =>
+                      current.map((item) =>
+                        item.id === id ? { ...item, selected: !item.selected } : item,
+                      ),
+                    )
+                  }
+                  onSelectAll={() =>
+                    setBatchImages((current) =>
+                      current.map((item) => ({ ...item, selected: true })),
+                    )
+                  }
+                  onClearSelection={() =>
+                    setBatchImages((current) =>
+                      current.map((item) => ({ ...item, selected: false })),
+                    )
+                  }
+                  onRemove={removeBatchImage}
+                  onClear={clearBatchImages}
+                  onExportAll={() => exportBatch('all')}
+                  onExportSelected={() => exportBatch('selected')}
+                  onExportSuccessful={() => exportBatch('successful')}
+                  onCancelExport={cancelBatchExport}
+                  onRetryFailed={() => exportBatch('failed')}
+                  exportMessage={batchExportMessage}
+                  onPreview={(asset) => setLightbox({ image: asset, title: asset.file.name })}
                 />
-                <div className="current-card">
-                  <span className="panel-kicker">当前实拍</span>
-                  {userImage ? (
-                    <button
-                      type="button"
-                      className="current-preview"
-                      onClick={() => setLightbox({ image: userImage, title: '当前实拍照' })}
-                    >
-                      <img src={userImage.url} alt="当前实拍照" />
-                      <span>
-                        <strong>{userImage.file.name}</strong>
-                        <small>
-                          {userImage.width} x {userImage.height}
-                          {currentItem?.overrideAdjustments ? ' · 已自定义' : ''}
-                        </small>
-                      </span>
-                    </button>
-                  ) : (
-                    <div className="current-empty">
-                      <ImageIcon size={22} />
-                      <span>从图片队列选择一张实拍照</span>
-                    </div>
-                  )}
-                </div>
               </div>
 
               <CanvasPreview
                 image={userImage}
                 adjustments={currentAdjustments}
                 mode={previewMode}
+                risks={previewRisks}
+                renderStatus={previewStatus}
                 onModeChange={setPreviewMode}
                 onPreview={(image) => setLightbox({ image, title: '主预览' })}
-              />
-
-              <BatchImageQueue
-                items={batchImages}
-                selectedId={selectedImageId}
-                exporting={batchExporting}
-                filter={batchFilter}
-                onFilterChange={setBatchFilter}
-                onAdd={addBatchImages}
-                onSelect={(id) => {
-                  setSelectedImageId(id)
-                  clearColorAnalysis()
-                }}
-                onToggleSelect={(id) =>
-                  setBatchImages((current) =>
-                    current.map((item) =>
-                      item.id === id ? { ...item, selected: !item.selected } : item,
-                    ),
-                  )
-                }
-                onSelectAll={() =>
-                  setBatchImages((current) =>
-                    current.map((item) => ({ ...item, selected: true })),
-                  )
-                }
-                onClearSelection={() =>
-                  setBatchImages((current) =>
-                    current.map((item) => ({ ...item, selected: false })),
-                  )
-                }
-                onRemove={removeBatchImage}
-                onClear={clearBatchImages}
-                onExportAll={() => exportBatch('all')}
-                onExportSelected={() => exportBatch('selected')}
-                onExportSuccessful={() => exportBatch('successful')}
-                onCancelExport={cancelBatchExport}
-                onRetryFailed={() => exportBatch('failed')}
-                exportMessage={batchExportMessage}
-                onPreview={(asset) => setLightbox({ image: asset, title: asset.file.name })}
+                onRenderStatusChange={setPreviewStatus}
+                onRisksChange={setPreviewRisks}
               />
             </div>
 
@@ -1041,8 +1180,10 @@ function App() {
                   className="analysis-button"
                   onClick={
                     analysisStatus === 'loading'
-                      ? cancelColorAnalysis
-                      : runColorAnalysis
+                      ? analysisSoftTimedOut
+                        ? continueColorAnalysis
+                        : cancelColorAnalysis
+                      : () => void runColorAnalysis()
                   }
                   disabled={
                     analysisStatus !== 'loading' && (!targetImage || !userImage)
@@ -1053,22 +1194,41 @@ function App() {
                   ) : (
                     <WandSparkles size={17} />
                   )}
-                  {getColorAnalysisButtonLabel(analysisStatus)}
+                  {getColorAnalysisButtonLabel(analysisStatus, analysisSoftTimedOut)}
                 </button>
+                {analysisSoftTimedOut && analysisStatus === 'loading' && (
+                  <AiTimeoutActions
+                    onContinue={continueColorAnalysis}
+                    onRetry={retryColorAnalysis}
+                    onCancel={cancelColorAnalysis}
+                  />
+                )}
                 {analysisStatus === 'error' && analysisError && (
-                  <StatusMessage tone="error">{analysisError}</StatusMessage>
+                  <AnalysisErrorMessage
+                    code={analysisErrorCode}
+                    message={analysisError}
+                    onRetry={retryColorAnalysis}
+                  />
                 )}
                 {aiAnalysis && (
                   <AiSuggestionCard
                     result={aiAnalysis}
+                    strength={aiApplyStrength}
+                    onStrengthChange={setAiApplyStrength}
                     onApply={applyAiSuggestion}
-                    onPreview={() => applyAdjustmentsToScope(aiAnalysis.adjustments)}
                     onRestore={restoreAiSnapshot}
                     onCopy={() => navigator.clipboard.writeText(formatColorAnalysis(aiAnalysis))}
                   />
                 )}
                 {!aiAnalysis && analysisStatus !== 'error' && (
-                  <LocalAnalysis sections={colorAnalysis} />
+                  <div className="analysis-empty">
+                    <Sparkles size={20} />
+                    <p>
+                      {targetImage && userImage
+                        ? '点击开始分析，AI 建议生成前不会显示伪参数。'
+                        : '上传目标风格照并选择实拍照后开始分析。'}
+                    </p>
+                  </div>
                 )}
               </section>
 
@@ -1095,9 +1255,10 @@ function App() {
                 canRedo={!!historyFuture.length}
                 onChange={updateAdjustments}
                 onResetOne={resetOneAdjustment}
+                onResetGroup={resetGroupAdjustments}
                 onResetAll={resetAdjustments}
-                onRestoreAi={() => aiAnalysis && applyAdjustmentsToScope(aiAnalysis.adjustments)}
-                onRestorePreset={() => activePresetValues && applyAdjustmentsToScope(activePresetValues)}
+                onRestoreAi={() => aiAnalysis && applyAdjustmentsToScope(aiAnalysis.adjustments, { source: 'ai' })}
+                onRestorePreset={() => activePresetValues && applyAdjustmentsToScope(activePresetValues, { source: 'preset' })}
                 onUndo={undoAdjustments}
                 onRedo={redoAdjustments}
               />
@@ -1131,14 +1292,16 @@ function App() {
 
 function AiSuggestionCard({
   result,
+  strength,
+  onStrengthChange,
   onApply,
-  onPreview,
   onRestore,
   onCopy,
 }: {
   result: ColorAnalysisResult
+  strength: number
+  onStrengthChange: (strength: number) => void
   onApply: () => void
-  onPreview: () => void
   onRestore: () => void
   onCopy: () => void
 }) {
@@ -1171,25 +1334,37 @@ function AiSuggestionCard({
         <h3>风险与不确定性</h3>
         <ul>{result.risks.map((item) => <li key={item}>{item}</li>)}</ul>
       </article>
+      <article className="ai-strength-card">
+        <h3>应用强度</h3>
+        <div className="ai-strength-actions" aria-label="AI 应用强度">
+          {[25, 50, 100].map((value) => (
+            <button
+              key={value}
+              type="button"
+              className={strength === value ? 'active' : ''}
+              onClick={() => onStrengthChange(value)}
+            >
+              {value}%
+            </button>
+          ))}
+        </div>
+        <label className="ai-strength-slider">
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="5"
+            value={strength}
+            onChange={(event) => onStrengthChange(Number(event.target.value))}
+          />
+          <strong>{strength}%</strong>
+        </label>
+      </article>
       <div className="ai-result-actions">
-        <button type="button" onClick={onPreview}>预览建议</button>
         <button type="button" className="primary-inline" onClick={onApply}>应用建议</button>
         <button type="button" onClick={onCopy}>复制调整</button>
         <button type="button" onClick={onRestore}>恢复分析前</button>
       </div>
-    </div>
-  )
-}
-
-function LocalAnalysis({ sections }: { sections: { title: string; content: string }[] }) {
-  return (
-    <div className="local-analysis">
-      {sections.map((section) => (
-        <article key={section.title}>
-          <h3>{section.title}</h3>
-          <p>{section.content}</p>
-        </article>
-      ))}
     </div>
   )
 }
@@ -1379,6 +1554,50 @@ function StatusMessage({ tone, children }: { tone: 'success' | 'error'; children
   )
 }
 
+function AiTimeoutActions({
+  onContinue,
+  onRetry,
+  onCancel,
+}: {
+  onContinue: () => void
+  onRetry: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div className="ai-timeout-actions">
+      <StatusMessage tone="error">AI 分析等待较久，当前图片和参数均已保留。</StatusMessage>
+      <div>
+        <button type="button" onClick={onContinue}>继续等待</button>
+        <button type="button" onClick={onRetry}>重新分析</button>
+        <button type="button" onClick={onCancel}>取消</button>
+      </div>
+    </div>
+  )
+}
+
+function AnalysisErrorMessage({
+  code,
+  message,
+  onRetry,
+}: {
+  code: AnalysisErrorCode | null
+  message: string
+  onRetry: () => void
+}) {
+  const canRetry = code !== 'configuration' && code !== 'invalid-image'
+  return (
+    <div className="analysis-error-box">
+      <StatusMessage tone="error">{message}</StatusMessage>
+      <small>{analysisRecoveryHint(code)}</small>
+      {canRetry && (
+        <button type="button" onClick={onRetry}>
+          重试分析
+        </button>
+      )}
+    </div>
+  )
+}
+
 function formatApiHealth(health: ApiHealth) {
   if (health === 'ready') return 'AI 服务就绪'
   if (health === 'degraded') return 'AI 未配置'
@@ -1406,10 +1625,43 @@ function getColorAnalysisTone(
   return 'idle'
 }
 
-function getColorAnalysisButtonLabel(status: AnalysisStatus) {
-  if (status === 'loading') return '取消分析'
+function getColorAnalysisButtonLabel(status: AnalysisStatus, softTimedOut = false) {
+  if (status === 'loading') return softTimedOut ? '继续等待' : '取消分析'
   if (status === 'error') return '重新分析调色方案'
   return 'AI 分析调色方案'
+}
+
+function normalizeAnalysisError(error: unknown) {
+  if (error instanceof AnalysisApiError) {
+    return { code: error.code, message: error.message }
+  }
+  return {
+    code: 'unknown' as const,
+    message:
+      error instanceof Error ? error.message : 'AI 调色分析失败，请稍后重试。',
+  }
+}
+
+function analysisRecoveryHint(code: AnalysisErrorCode | null) {
+  if (code === 'network') return '请确认本地 API proxy 已启动。'
+  if (code === 'timeout') return '可以重试，或稍后在服务稳定后再次分析。'
+  if (code === 'invalid-image') return '请更换图片，或压缩后重新上传。'
+  if (code === 'bad-response') return 'AI 返回格式异常，请重新分析。'
+  if (code === 'configuration') return '请检查 Gemini API Key 配置和权限。'
+  if (code === 'quota') return '请降低请求频率，或检查 Gemini API 额度。'
+  if (code === 'cancelled') return '分析已取消，当前图片和参数已保留。'
+  return '当前图片和参数已保留，可重新分析。'
+}
+
+function getManualSource(source: AdjustmentSource | null): AdjustmentSource {
+  return source === 'ai' || source === 'mixed' ? 'mixed' : 'manual'
+}
+
+function sourceLabel(source: AdjustmentSource) {
+  if (source === 'ai') return 'AI'
+  if (source === 'preset') return '预设'
+  if (source === 'mixed') return 'AI+手动'
+  return '手动'
 }
 
 function scopeLabel(scope: ApplyScope) {

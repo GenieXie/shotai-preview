@@ -3,19 +3,24 @@ import {
   CheckCircle,
   Download,
   Eye,
-  ImagePlus,
   LoaderCircle,
+  ImagePlus,
   RotateCcw,
+  Sparkles,
   Trash2,
   XCircle,
 } from 'lucide-react'
-import type { AdjustmentValues } from '../lib/imageAdjustments'
+import type {
+  AdjustmentSource,
+  AdjustmentValues,
+} from '../lib/imageAdjustments'
 import { createImageAsset, type ImageAsset } from '../lib/imageAsset'
 
 export const MAX_BATCH_IMAGES = 20
 export const MAX_BATCH_TOTAL_SIZE = 200 * 1024 * 1024
 
 export type BatchExportStatus = 'idle' | 'processing' | 'done' | 'error'
+export type BatchAnalysisStatus = 'idle' | 'loading' | 'success' | 'error'
 export type BatchFilter = 'all' | 'selected' | 'customized' | 'error'
 
 export interface BatchImageItem {
@@ -25,6 +30,8 @@ export interface BatchImageItem {
   exportStatus: BatchExportStatus
   exportError?: string
   overrideAdjustments?: AdjustmentValues
+  adjustmentSource?: AdjustmentSource
+  analysisStatus?: BatchAnalysisStatus
 }
 
 interface BatchImageQueueProps {
@@ -237,6 +244,8 @@ export function BatchImageQueue({
                 item.id === selectedId ? 'active' : '',
                 item.selected ? 'checked' : '',
                 item.overrideAdjustments ? 'customized' : '',
+                item.analysisStatus === 'loading' ? 'analysis-loading' : '',
+                item.analysisStatus === 'error' ? 'analysis-error' : '',
               ].join(' ')}
             >
               <label className="batch-check">
@@ -258,9 +267,10 @@ export function BatchImageQueue({
                   <strong>{item.asset.file.name}</strong>
                   <small>
                     {item.asset.width} x {item.asset.height}
-                    {item.overrideAdjustments ? ' · 已自定义' : ''}
+                    {item.adjustmentSource ? ` · ${sourceLabel(item.adjustmentSource)}` : ''}
                     {item.asset.warnings.length ? ' · 有提示' : ''}
                   </small>
+                  <StatusTags item={item} />
                 </span>
               </button>
               <button
@@ -325,6 +335,35 @@ function ExportState({
     return <XCircle size={15} className="batch-state error" aria-label={error ?? '导出失败'} />
   }
   return <span className="batch-state idle" aria-hidden="true" />
+}
+
+function StatusTags({ item }: { item: BatchImageItem }) {
+  const tags: string[] = []
+  if (item.selected) tags.push('已选')
+  if (item.adjustmentSource) tags.push(sourceLabel(item.adjustmentSource))
+  if (item.analysisStatus === 'loading') tags.push('AI 分析中')
+  if (item.analysisStatus === 'success') tags.push('AI 已生成')
+  if (item.analysisStatus === 'error') tags.push('AI 失败')
+  if (item.exportStatus === 'error') tags.push('导出失败')
+  if (!tags.length) return null
+
+  return (
+    <span className="batch-tags">
+      {tags.slice(0, 3).map((tag) => (
+        <em key={tag}>
+          {tag.includes('AI') ? <Sparkles size={10} /> : null}
+          {tag}
+        </em>
+      ))}
+    </span>
+  )
+}
+
+function sourceLabel(source: AdjustmentSource) {
+  if (source === 'ai') return 'AI'
+  if (source === 'preset') return '预设'
+  if (source === 'mixed') return 'AI+手动'
+  return '手动'
 }
 
 function filterLabel(filter: BatchFilter) {

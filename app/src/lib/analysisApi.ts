@@ -7,7 +7,15 @@ import type {
   BeforeAnalysisResult,
   ColorAnalysisResult,
 } from './analysisContract'
+import {
+  AnalysisApiError,
+  classifyAnalysisResponseError,
+} from './analysisErrors'
+import type { AnalysisErrorCode } from './analysisErrors'
 import { encodeImageForAnalysis } from './imageEncoding'
+
+export { AnalysisApiError, classifyAnalysisResponseError }
+export type { AnalysisErrorCode }
 
 export async function analyzeColorMatch(
   targetImage: ImageAsset,
@@ -75,33 +83,48 @@ async function requestAnalysis(
 
     const payload = await response.json().catch(() => null)
     if (!response.ok) {
-      throw new Error(
-        payload?.message || classifyResponseError(response.status),
+      const classified = classifyAnalysisResponseError(response.status, payload?.error)
+      throw new AnalysisApiError(
+        payload?.message || classified.message,
+        classified.code,
+        response.status,
       )
     }
     return payload
   } catch (error) {
+    if (error instanceof AnalysisApiError) throw error
     if (externalSignal?.aborted) {
-      throw new Error('分析已取消，图片和参数均已保留。', { cause: error })
+      throw new AnalysisApiError(
+        '分析已取消，图片和参数均已保留。',
+        'cancelled',
+        undefined,
+        error,
+      )
     }
     if (error instanceof DOMException && error.name === 'TimeoutError') {
-      throw new Error('AI 分析等待超时，请稍后重试；图片和参数均已保留。', {
-        cause: error,
-      })
+      throw new AnalysisApiError(
+        'AI 分析等待超时，请稍后重试；图片和参数均已保留。',
+        'timeout',
+        504,
+        error,
+      )
     }
     if (error instanceof TypeError) {
-      throw new Error('无法连接本地 API proxy，请确认服务已启动。', {
-        cause: error,
-      })
+      throw new AnalysisApiError(
+        '无法连接本地 API proxy，请确认服务已启动。',
+        'network',
+        undefined,
+        error,
+      )
     }
-    throw error
+    if (error instanceof Error && error.message.includes('格式错误')) {
+      throw new AnalysisApiError(error.message, 'bad-response', undefined, error)
+    }
+    throw new AnalysisApiError(
+      error instanceof Error ? error.message : 'AI 分析失败，请稍后重试。',
+      'unknown',
+      undefined,
+      error,
+    )
   }
-}
-
-function classifyResponseError(status: number) {
-  if (status === 401 || status === 403) return 'Gemini API Key 无效或无权限。'
-  if (status === 429) return 'Gemini API 额度不足或请求过于频繁。'
-  if (status === 503) return 'Gemini 服务暂时繁忙，请稍后重试。'
-  if (status === 504) return 'Gemini API 响应超时，请稍后重试。'
-  return 'AI 分析失败，请稍后重试。'
 }
