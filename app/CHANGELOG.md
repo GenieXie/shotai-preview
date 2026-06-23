@@ -1,5 +1,37 @@
 # Changelog
 
+## 2.3.1 - 2026-06-21
+
+Shotai V2.3.1 speeds up AI analysis and closes the V2.3 PRD gaps:
+
+- Compresses AI analysis images more aggressively before upload.
+- Shortens the color-analysis prompt and response schema while preserving the
+  existing result shape.
+- Lowers front-end and Gemini request timeouts so slow calls fail faster instead
+  of leaving the user waiting.
+- Reduces Gemini retry delay to one short retry for transient failures.
+- Shows AI analysis phases and reuses recent same-image color-analysis results
+  from an in-memory cache.
+- Adds a collapsible performance panel with preview/export timings, Worker
+  queue state, current-image dimensions, and resource-management notes.
+
+## 2.3.0 - 2026-06-21
+
+Shotai V2.3 improves performance and production batch workflows:
+
+- Reuses a cancellable image-adjustment Worker queue instead of creating a new
+  Worker for every preview render.
+- Adds fast preview rendering followed by a final high-quality pass so slider
+  changes feel more responsive on large images.
+- Combines preview adjustment and highlight/shadow/saturation risk detection in
+  one pixel pass.
+- Adds batch export quality and max-edge controls for high-quality, standard,
+  and lightweight outputs.
+- Processes batch exports with limited concurrency and shows queued, decoding,
+  processing, encoding, packaging, completed, and failed states per image.
+- Preserves successful batch results when cancellation or per-image failures
+  happen, with failed-item retry still available.
+
 ## 2.2.0 - 2026-06-20
 
 Shotai V2.2 stabilizes the color workbench around the V2.2 PRD (P0 + P1):

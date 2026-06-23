@@ -4,12 +4,11 @@ Shotai is an AI-assisted photography and color-grading workspace.
 
 ## Current Version
 
-V2.2 stable color workbench release. Building on the V2.0 workbench, V2.2
-fixes preview layout jumps, stabilizes the four preview modes, makes the
-current parameters the single source of truth for preview and export, adds
-render-status feedback, an AI soft timeout with recovery, an AI apply-strength
-blend (25/50/100 and a slider), and highlight/shadow/saturation risk detection.
-See `CHANGELOG.md` for the full V2.1 and V2.2 history.
+V2.3.1 performance and production-experience release. Building on the V2.2
+stable color workbench, V2.3 adds faster preview rendering, reusable Worker
+processing, concurrent batch export, export controls, faster AI analysis,
+AI phase feedback, same-image analysis caching, and a compact performance panel.
+See `CHANGELOG.md` for the full V2 history.
 
 Core workbench capabilities:
 
@@ -27,12 +26,19 @@ Core workbench capabilities:
 - Select any queued photo for preview and AI analysis, apply adjustments to the
   current, selected, or all photos, and mark per-photo overrides.
 - Export the current image as JPG, selected photos, successful photos, or the
-  whole batch as one ZIP.
-- Track per-image batch export progress, failures, and retry failed items.
+  whole batch as one ZIP with quality and max-edge controls.
+- Track per-image batch export progress across queued, decoding, processing,
+  encoding, packaging, done, and error states.
+- Process batch exports with limited concurrency and retry failed items without
+  blocking already successful photos.
 - Skip duplicate files and recover cleanly from partial processing failures.
 - Reject images above 40MP and warn about panoramas, low resolution, large
   files, PNG transparency, and possible wide-gamut color differences.
-- Process pixel adjustments in cancellable Web Workers.
+- Process pixel adjustments in a reusable cancellable Worker queue.
+- Render previews in a fast low-resolution pass followed by a final high-quality
+  pass to improve slider responsiveness on large images.
+- Detect highlight, shadow, and saturation risks during the same pixel pass used
+  for preview adjustments.
 - Cancel in-flight AI analysis and batch export without clearing user work.
 - Check API proxy health and classify timeout, quota, authentication, and
   service errors.

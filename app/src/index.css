@@ -799,6 +799,35 @@ main {
   font-weight: 700;
 }
 
+.export-options {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.export-options label {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: white;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.export-options select {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+
 .batch-list {
   margin-top: 10px;
   padding-bottom: 3px;
@@ -915,6 +944,22 @@ main {
   color: var(--danger);
 }
 
+.batch-state-label {
+  min-width: 36px;
+  justify-self: center;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.batch-state-label.active {
+  color: var(--accent-dark);
+}
+
 .batch-state.idle {
   width: 6px;
   height: 6px;
@@ -970,6 +1015,7 @@ main {
   color: var(--danger);
 }
 
+.performance-panel,
 .scope-panel,
 .ai-action-panel,
 .preset-panel {
@@ -978,6 +1024,74 @@ main {
   border: 1px solid #e4e8e5;
   border-radius: 9px;
   background: #fbfcfb;
+}
+
+.performance-panel {
+  padding: 8px;
+}
+
+.performance-toggle {
+  width: 100%;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: white;
+  color: var(--accent-dark);
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 900;
+  text-align: left;
+  cursor: pointer;
+}
+
+.performance-toggle span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.performance-details {
+  margin-top: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.performance-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.performance-grid span,
+.performance-list span {
+  padding: 7px;
+  border: 1px solid #e4e8e5;
+  border-radius: 7px;
+  background: white;
+  color: var(--muted);
+  display: grid;
+  gap: 2px;
+  font-size: 9px;
+}
+
+.performance-grid strong,
+.performance-list strong {
+  color: var(--text);
+  font-size: 10px;
+}
+
+.resource-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.performance-list {
+  display: grid;
+  gap: 5px;
 }
 
 .ai-action-panel.prominent {
@@ -1033,6 +1147,18 @@ main {
   color: var(--accent-dark);
   border-color: #bdded6;
   background: var(--accent-soft);
+}
+
+.analysis-phase {
+  margin: 8px 0 0;
+  padding: 7px 9px;
+  border: 1px solid #d6e3de;
+  border-radius: 7px;
+  color: var(--accent-dark);
+  background: #eef7f4;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.45;
 }
 
 .ai-result-card {

@@ -17,25 +17,43 @@ import { encodeImageForAnalysis } from './imageEncoding'
 export { AnalysisApiError, classifyAnalysisResponseError }
 export type { AnalysisErrorCode }
 
+export type ColorAnalysisPhase =
+  | 'encoding'
+  | 'uploading'
+  | 'analyzing'
+  | 'parsing'
+
+interface ColorAnalysisOptions {
+  signal?: AbortSignal
+  onPhaseChange?: (phase: ColorAnalysisPhase) => void
+}
+
 export async function analyzeColorMatch(
   targetImage: ImageAsset,
   userImage: ImageAsset,
-  signal?: AbortSignal,
+  optionsOrSignal?: ColorAnalysisOptions | AbortSignal,
 ): Promise<ColorAnalysisResult> {
+  const options = isAbortSignal(optionsOrSignal)
+    ? { signal: optionsOrSignal }
+    : (optionsOrSignal ?? {})
+  options.onPhaseChange?.('encoding')
   const [targetPayload, userPayload] = await Promise.all([
     encodeImageForAnalysis(targetImage),
     encodeImageForAnalysis(userImage),
   ])
 
+  options.onPhaseChange?.('uploading')
   const payload = await requestAnalysis(
     '/api/color-analysis',
     {
       targetImage: targetPayload,
       userImage: userPayload,
     },
-    signal,
+    options.signal,
+    () => options.onPhaseChange?.('analyzing'),
   )
 
+  options.onPhaseChange?.('parsing')
   return normalizeColorAnalysis(payload)
 }
 
@@ -65,13 +83,15 @@ async function requestAnalysis(
   endpoint: string,
   body: unknown,
   externalSignal?: AbortSignal,
+  beforeFetch?: () => void,
 ) {
-  const timeoutSignal = AbortSignal.timeout(35_000)
+  const timeoutSignal = AbortSignal.timeout(18_000)
   const signal = externalSignal
     ? AbortSignal.any([externalSignal, timeoutSignal])
     : timeoutSignal
 
   try {
+    beforeFetch?.()
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
@@ -103,7 +123,7 @@ async function requestAnalysis(
     }
     if (error instanceof DOMException && error.name === 'TimeoutError') {
       throw new AnalysisApiError(
-        'AI 分析等待超时，请稍后重试；图片和参数均已保留。',
+        'AI 分析超过快速等待时间，已停止本次请求；图片和参数均已保留。',
         'timeout',
         504,
         error,
@@ -127,4 +147,10 @@ async function requestAnalysis(
       error,
     )
   }
+}
+
+function isAbortSignal(
+  value: ColorAnalysisOptions | AbortSignal | undefined,
+): value is AbortSignal {
+  return !!value && 'aborted' in value && 'addEventListener' in value
 }

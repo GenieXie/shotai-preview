@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AlertCircle,
   Aperture,
+  Activity,
   Camera,
   CheckCircle,
   Clipboard,
@@ -54,6 +55,7 @@ import {
   analyzeColorMatch,
   getApiHealth,
   type AnalysisErrorCode,
+  type ColorAnalysisPhase,
 } from './lib/analysisApi'
 import type {
   BeforeAnalysisResult,
@@ -73,8 +75,11 @@ import {
 import {
   createExportFilename,
   downloadBlob,
+  type ExportQuality,
+  type ExportStage,
   renderAdjustedImageBlob,
 } from './lib/imageExport'
+import { getAdjustmentWorkerSnapshot } from './lib/adjustmentWorkerClient'
 import { createImageAsset, type ImageAsset } from './lib/imageAsset'
 import { createZipBlob } from './lib/zipExport'
 
@@ -82,10 +87,19 @@ type ActiveTab = 'before' | 'after'
 type AnalysisStatus = 'idle' | 'loading' | 'success' | 'error'
 type ApiHealth = 'checking' | 'ready' | 'degraded' | 'offline'
 type ApplyScope = 'current' | 'selected' | 'all'
+type AnalysisCacheSource = 'fresh' | 'cached' | null
+
+interface PerformanceMetric {
+  label: string
+  durationMs: number
+  detail: string
+  createdAt: number
+}
 
 const SESSION_STORAGE_KEY = 'shotai.session.v2'
 const MAX_SESSION_IMAGE_BYTES = 4 * 1024 * 1024
-const AI_SOFT_TIMEOUT_MS = 18_000
+const AI_SOFT_TIMEOUT_MS = 8_000
+const BATCH_EXPORT_CONCURRENCY = 2
 
 interface LightboxState {
   image: ImageAsset
@@ -123,6 +137,8 @@ interface StoredSession {
   aiAnalysis: ColorAnalysisResult | null
   aiSnapshot: AdjustmentValues | null
   beforeResult: BeforeAnalysisResult | null
+  exportQuality?: ExportQuality
+  exportMaxEdge?: number
 }
 
 async function restoreStoredImage(
@@ -165,6 +181,8 @@ function App() {
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null)
   const [batchExporting, setBatchExporting] = useState(false)
   const [batchExportMessage, setBatchExportMessage] = useState('')
+  const [exportQuality, setExportQuality] = useState<ExportQuality>('standard')
+  const [exportMaxEdge, setExportMaxEdge] = useState(4096)
   const [batchFilter, setBatchFilter] = useState<BatchFilter>('all')
   const [apiHealth, setApiHealth] = useState<ApiHealth>('checking')
   const [globalAdjustments, setGlobalAdjustments] =
@@ -188,6 +206,10 @@ function App() {
   const [analysisErrorCode, setAnalysisErrorCode] =
     useState<AnalysisErrorCode | null>(null)
   const [analysisSoftTimedOut, setAnalysisSoftTimedOut] = useState(false)
+  const [analysisPhase, setAnalysisPhase] =
+    useState<ColorAnalysisPhase | null>(null)
+  const [analysisCacheSource, setAnalysisCacheSource] =
+    useState<AnalysisCacheSource>(null)
   const [aiAnalysis, setAiAnalysis] = useState<ColorAnalysisResult | null>(null)
   const [aiSnapshot, setAiSnapshot] = useState<AdjustmentValues | null>(null)
   const [aiApplyStrength, setAiApplyStrength] = useState(100)
@@ -201,6 +223,8 @@ function App() {
   const [previewStatus, setPreviewStatus] =
     useState<PreviewRenderStatus>('idle')
   const [previewRisks, setPreviewRisks] = useState<PreviewRisk[]>([])
+  const [showPerformancePanel, setShowPerformancePanel] = useState(false)
+  const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetric[]>([])
   const [lightbox, setLightbox] = useState<LightboxState | null>(null)
   const [sessionMessage, setSessionMessage] = useState('')
   const imagesRef = useRef({
@@ -210,6 +234,7 @@ function App() {
   })
   const sessionHydratedRef = useRef(false)
   const sessionImageCacheRef = useRef(new Map<string, string>())
+  const colorAnalysisCacheRef = useRef(new Map<string, ColorAnalysisResult>())
   const colorAnalysisControllerRef = useRef<AbortController | null>(null)
   const colorAnalysisRequestRef = useRef(0)
   const colorAnalysisSoftTimeoutRef = useRef<number | null>(null)
@@ -230,6 +255,29 @@ function App() {
     ? applyPresetStrength(activePreset.adjustments, presetStrength)
     : null
   const selectedCount = batchImages.filter((item) => item.selected).length
+
+  const recordPerformanceMetric = (metric: Omit<PerformanceMetric, 'createdAt'>) => {
+    setPerformanceMetrics((current) =>
+      [{ ...metric, createdAt: Date.now() }, ...current].slice(0, 10),
+    )
+  }
+
+  const recordPreviewMetric = useCallback(
+    (metric: { pass: 'fast' | 'final'; durationMs: number; width: number; height: number }) => {
+      setPerformanceMetrics((current) =>
+        [
+          {
+            label: metric.pass === 'fast' ? '快速预览' : '高清预览',
+            durationMs: metric.durationMs,
+            detail: `${metric.width} x ${metric.height}`,
+            createdAt: Date.now(),
+          },
+          ...current,
+        ].slice(0, 10),
+      )
+    },
+    [],
+  )
 
   useEffect(() => {
     imagesRef.current = {
@@ -319,6 +367,8 @@ function App() {
           stored.aiSnapshot ? normalizeAdjustmentValues(stored.aiSnapshot) : null,
         )
         setBeforeResult(stored.beforeResult)
+        setExportQuality(stored.exportQuality ?? 'standard')
+        setExportMaxEdge(stored.exportMaxEdge ?? 4096)
         setSessionMessage(
           missingImageCount
             ? `已恢复上次会话；${missingImageCount} 张大图需要重新上传授权。`
@@ -389,6 +439,8 @@ function App() {
             aiAnalysis,
             aiSnapshot,
             beforeResult,
+            exportQuality,
+            exportMaxEdge,
           }
           localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stored))
         } catch {
@@ -409,6 +461,8 @@ function App() {
     batchImages,
     beforeImage,
     beforeResult,
+    exportMaxEdge,
+    exportQuality,
     globalAdjustments,
     globalAdjustmentSource,
     persistImage,
@@ -444,6 +498,8 @@ function App() {
     setAnalysisError('')
     setAnalysisErrorCode(null)
     setAnalysisSoftTimedOut(false)
+    setAnalysisPhase(null)
+    setAnalysisCacheSource(null)
     setAnalysisStatus('idle')
     if (colorAnalysisSoftTimeoutRef.current) {
       window.clearTimeout(colorAnalysisSoftTimeoutRef.current)
@@ -564,25 +620,34 @@ function App() {
     setBatchExporting(true)
     const controller = new AbortController()
     batchExportControllerRef.current = controller
-    setBatchExportMessage(`正在处理 ${candidates.length} 张图片...`)
+    const startedAt = performance.now()
+    setBatchExportMessage(
+      `正在处理 ${candidates.length} 张图片 · 最长边 ${exportMaxEdge}px · ${exportQualityLabel(exportQuality)}。`,
+    )
     setBatchImages((current) =>
       current.map((item) =>
         candidates.some((candidate) => candidate.id === item.id)
-          ? { ...item, exportStatus: 'idle', exportError: undefined }
+          ? { ...item, exportStatus: 'queued', exportError: undefined }
           : item,
       ),
     )
 
     const exported: { name: string; blob: Blob }[] = []
+    let cursor = 0
     try {
-      for (const [index, item] of candidates.entries()) {
+      const runNext = async (): Promise<void> => {
         if (controller.signal.aborted) {
           throw new DOMException('批量处理已取消。', 'AbortError')
         }
+        const index = cursor
+        const item = candidates[index]
+        cursor += 1
+        if (!item) return
+
         setBatchImages((current) =>
           current.map((candidate) =>
             candidate.id === item.id
-              ? { ...candidate, exportStatus: 'processing', exportError: undefined }
+              ? { ...candidate, exportStatus: 'decoding', exportError: undefined }
               : candidate,
           ),
         )
@@ -590,7 +655,12 @@ function App() {
           const blob = await renderAdjustedImageBlob(
             item.asset,
             item.overrideAdjustments ?? globalAdjustments,
-            controller.signal,
+            {
+              signal: controller.signal,
+              quality: exportQuality,
+              maxEdge: exportMaxEdge,
+              onStageChange: (stage) => updateBatchExportStage(item.id, stage),
+            },
           )
           exported.push({
             name: createExportFilename(item.asset.file.name, index),
@@ -611,28 +681,69 @@ function App() {
                     ...candidate,
                     exportStatus: 'error',
                     exportError:
-                      error instanceof Error ? error.message : '图片导出失败。',
+                      controller.signal.aborted
+                        ? '批量处理已取消。'
+                        : error instanceof Error
+                          ? error.message
+                          : '图片导出失败。',
                   }
                 : candidate,
             ),
           )
         }
+        await runNext()
       }
+
+      await Promise.all(
+        Array.from({ length: Math.min(BATCH_EXPORT_CONCURRENCY, candidates.length) }, () =>
+          runNext(),
+        ),
+      )
       if (!exported.length) throw new Error('没有图片成功完成处理。')
       if (controller.signal.aborted) {
         throw new DOMException('批量处理已取消。', 'AbortError')
       }
 
       setBatchExportMessage('图片处理完成，正在打包 ZIP...')
+      setBatchImages((current) =>
+        current.map((item) =>
+          candidates.some((candidate) => candidate.id === item.id) &&
+          item.exportStatus === 'done'
+            ? { ...item, exportStatus: 'packaging' }
+            : item,
+        ),
+      )
       const zip = await createZipBlob(exported)
       downloadBlob(zip, `shotai-batch-${Date.now()}.zip`)
       const failed = candidates.length - exported.length
+      const elapsed = Math.max(0.1, (performance.now() - startedAt) / 1000)
+      recordPerformanceMetric({
+        label: '批量导出',
+        durationMs: elapsed * 1000,
+        detail: `${exported.length}/${candidates.length} 张 · ${exportMaxEdge}px · ${exportQualityLabel(exportQuality)}`,
+      })
+      setBatchImages((current) =>
+        current.map((item) =>
+          item.exportStatus === 'packaging' ? { ...item, exportStatus: 'done' } : item,
+        ),
+      )
       setBatchExportMessage(
         failed
-          ? `已导出 ${exported.length} 张；${failed} 张处理失败，可筛选失败项重试。`
-          : `已将 ${exported.length} 张图片打包为 ZIP。`,
+          ? `已导出 ${exported.length} 张；${failed} 张处理失败，用时 ${elapsed.toFixed(1)} 秒。`
+          : `已将 ${exported.length} 张图片打包为 ZIP，用时 ${elapsed.toFixed(1)} 秒。`,
       )
     } catch (error) {
+      setBatchImages((current) =>
+        current.map((item) =>
+          item.exportStatus === 'queued' ||
+          item.exportStatus === 'decoding' ||
+          item.exportStatus === 'processing' ||
+          item.exportStatus === 'encoding' ||
+          item.exportStatus === 'packaging'
+            ? { ...item, exportStatus: 'idle' }
+            : item,
+        ),
+      )
       setBatchExportMessage(
         controller.signal.aborted
           ? '批量处理已取消；已完成的状态仍保留。'
@@ -648,6 +759,14 @@ function App() {
 
   const cancelBatchExport = () => {
     batchExportControllerRef.current?.abort()
+  }
+
+  const updateBatchExportStage = (id: string, stage: ExportStage) => {
+    setBatchImages((current) =>
+      current.map((item) =>
+        item.id === id ? { ...item, exportStatus: stage } : item,
+      ),
+    )
   }
 
   const resetAdjustments = () => {
@@ -829,10 +948,30 @@ function App() {
 
     const requestId = colorAnalysisRequestRef.current + 1
     colorAnalysisRequestRef.current = requestId
+    const cacheKey = colorAnalysisCacheKey(targetImage, userImage)
+    const cached = options.restart
+      ? null
+      : colorAnalysisCacheRef.current.get(cacheKey)
+    if (cached) {
+      setAiAnalysis(cached)
+      setAnalysisStatus('success')
+      setAnalysisError('')
+      setAnalysisErrorCode(null)
+      setAnalysisSoftTimedOut(false)
+      setAnalysisPhase(null)
+      setAnalysisCacheSource('cached')
+      setAiApplyStrength(100)
+      setAiSnapshot(currentAdjustments)
+      setCurrentImageAnalysisStatus('success')
+      setPresetMessage('已复用最近一次 AI 分析结果。')
+      return
+    }
     setAnalysisStatus('loading')
     setAnalysisError('')
     setAnalysisErrorCode(null)
     setAnalysisSoftTimedOut(false)
+    setAnalysisPhase('encoding')
+    setAnalysisCacheSource(null)
     setAiApplyStrength(100)
     setAiSnapshot(currentAdjustments)
     setCurrentImageAnalysisStatus('loading')
@@ -841,11 +980,17 @@ function App() {
     colorAnalysisControllerRef.current = controller
 
     try {
-      const result = await analyzeColorMatch(targetImage, userImage, controller.signal)
+      const result = await analyzeColorMatch(targetImage, userImage, {
+        signal: controller.signal,
+        onPhaseChange: setAnalysisPhase,
+      })
       if (colorAnalysisRequestRef.current !== requestId) return
+      colorAnalysisCacheRef.current.set(cacheKey, result)
       setAiAnalysis(result)
       setAnalysisStatus('success')
       setAnalysisSoftTimedOut(false)
+      setAnalysisPhase(null)
+      setAnalysisCacheSource('fresh')
       setCurrentImageAnalysisStatus('success')
       setPresetMessage('AI 建议已生成，点击“应用建议”后才会写入参数。')
     } catch (error) {
@@ -853,6 +998,8 @@ function App() {
       const apiError = normalizeAnalysisError(error)
       setAnalysisStatus('error')
       setAnalysisSoftTimedOut(false)
+      setAnalysisPhase(null)
+      setAnalysisCacheSource(null)
       setAnalysisError(apiError.message)
       setAnalysisErrorCode(apiError.code)
       setCurrentImageAnalysisStatus('error')
@@ -951,7 +1098,7 @@ function App() {
             <Aperture size={19} strokeWidth={2.2} />
           </span>
           <span>Shotai</span>
-          <span className="version-tag">V2.2</span>
+          <span className="version-tag">V2.3</span>
         </div>
         <nav className="global-nav" aria-label="全局导航">
           <button type="button" className={activeTab === 'before' ? 'active' : ''} onClick={() => setActiveTab('before')}>
@@ -1064,7 +1211,11 @@ function App() {
                   selectedId={selectedImageId}
                   exporting={batchExporting}
                   filter={batchFilter}
+                  exportQuality={exportQuality}
+                  exportMaxEdge={exportMaxEdge}
                   onFilterChange={setBatchFilter}
+                  onExportQualityChange={setExportQuality}
+                  onExportMaxEdgeChange={setExportMaxEdge}
                   onAdd={addBatchImages}
                   onSelect={(id) => {
                     setSelectedImageId(id)
@@ -1105,14 +1256,38 @@ function App() {
                 mode={previewMode}
                 risks={previewRisks}
                 renderStatus={previewStatus}
+                exportQuality={exportQuality}
+                exportMaxEdge={exportMaxEdge}
                 onModeChange={setPreviewMode}
                 onPreview={(image) => setLightbox({ image, title: '主预览' })}
                 onRenderStatusChange={setPreviewStatus}
                 onRisksChange={setPreviewRisks}
+                onRenderMetric={recordPreviewMetric}
               />
             </div>
 
             <aside className="control-column v2-controls">
+              <section className="performance-panel">
+                <button
+                  type="button"
+                  className="performance-toggle"
+                  onClick={() => setShowPerformancePanel((current) => !current)}
+                  aria-expanded={showPerformancePanel}
+                >
+                  <Activity size={15} />
+                  性能
+                  <span>{showPerformancePanel ? '收起' : '查看'}</span>
+                </button>
+                {showPerformancePanel && (
+                  <PerformancePanel
+                    currentImage={userImage}
+                    queueCount={batchImages.length}
+                    previewStatus={previewStatus}
+                    metrics={performanceMetrics}
+                    cacheCount={colorAnalysisCacheRef.current.size}
+                  />
+                )}
+              </section>
               <section className="scope-panel">
                 <div className="panel-heading compact">
                   <div>
@@ -1196,6 +1371,15 @@ function App() {
                   )}
                   {getColorAnalysisButtonLabel(analysisStatus, analysisSoftTimedOut)}
                 </button>
+                {(analysisStatus === 'loading' || analysisCacheSource) && (
+                  <p className="analysis-phase">
+                    {analysisStatus === 'loading'
+                      ? analysisPhaseLabel(analysisPhase)
+                      : analysisCacheSource === 'cached'
+                        ? '已复用同一组图片的最近分析结果。'
+                        : 'AI 分析完成，本次结果已加入本地缓存。'}
+                  </p>
+                )}
                 {analysisSoftTimedOut && analysisStatus === 'loading' && (
                   <AiTimeoutActions
                     onContinue={continueColorAnalysis}
@@ -1365,6 +1549,63 @@ function AiSuggestionCard({
         <button type="button" onClick={onCopy}>复制调整</button>
         <button type="button" onClick={onRestore}>恢复分析前</button>
       </div>
+    </div>
+  )
+}
+
+function PerformancePanel({
+  currentImage,
+  queueCount,
+  previewStatus,
+  metrics,
+  cacheCount,
+}: {
+  currentImage: ImageAsset | null
+  queueCount: number
+  previewStatus: PreviewRenderStatus
+  metrics: PerformanceMetric[]
+  cacheCount: number
+}) {
+  const worker = getAdjustmentWorkerSnapshot()
+  return (
+    <div className="performance-details">
+      <div className="performance-grid">
+        <span>
+          <strong>{currentImage ? `${currentImage.width} x ${currentImage.height}` : '-'}</strong>
+          当前图片
+        </span>
+        <span>
+          <strong>{previewStatusLabel(previewStatus)}</strong>
+          预览状态
+        </span>
+        <span>
+          <strong>{queueCount}</strong>
+          队列图片
+        </span>
+        <span>
+          <strong>{worker.active ? `运行中 +${worker.queued}` : `${worker.queued} 等待`}</strong>
+          Worker
+        </span>
+        <span>
+          <strong>{cacheCount}</strong>
+          AI 缓存
+        </span>
+      </div>
+      <p className="resource-note">
+        大图不写入持久缓存；删除、切换和清空队列会释放图片 URL，预览只保留当前图片源像素。
+      </p>
+      {metrics.length ? (
+        <div className="performance-list">
+          {metrics.slice(0, 5).map((metric) => (
+            <span key={`${metric.createdAt}:${metric.label}`}>
+              <strong>{metric.label}</strong>
+              {metric.durationMs.toFixed(0)}ms · {metric.detail}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p className="resource-note">完成一次预览或导出后会显示最近耗时。</p>
+      )}
     </div>
   )
 }
@@ -1662,6 +1903,42 @@ function sourceLabel(source: AdjustmentSource) {
   if (source === 'preset') return '预设'
   if (source === 'mixed') return 'AI+手动'
   return '手动'
+}
+
+function exportQualityLabel(quality: ExportQuality) {
+  if (quality === 'high') return '高质量'
+  if (quality === 'light') return '轻量'
+  return '标准质量'
+}
+
+function analysisPhaseLabel(phase: ColorAnalysisPhase | null) {
+  if (phase === 'encoding') return '正在准备压缩图片...'
+  if (phase === 'uploading') return '正在上传压缩图到本地 API proxy...'
+  if (phase === 'analyzing') return 'Gemini 正在快速分析色彩差异...'
+  if (phase === 'parsing') return '正在解析结构化调色建议...'
+  return '正在准备 AI 分析...'
+}
+
+function previewStatusLabel(status: PreviewRenderStatus) {
+  if (status === 'loading-source') return '读取图片'
+  if (status === 'rendering') return '渲染中'
+  if (status === 'ready') return '已更新'
+  if (status === 'error') return '失败'
+  return '空闲'
+}
+
+function colorAnalysisCacheKey(target: ImageAsset, user: ImageAsset) {
+  return `${imageFingerprint(target)}::${imageFingerprint(user)}`
+}
+
+function imageFingerprint(image: ImageAsset) {
+  return [
+    image.file.name,
+    image.file.size,
+    image.file.lastModified,
+    image.width,
+    image.height,
+  ].join(':')
 }
 
 function scopeLabel(scope: ApplyScope) {

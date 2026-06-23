@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   applyAdjustments,
+  applyAdjustmentsWithRisks,
   blendAdjustments,
   DEFAULT_ADJUSTMENTS,
   detectPreviewRisks,
@@ -155,4 +156,26 @@ test('detectPreviewRisks identifies clipped highlights, crushed shadows, and sat
     risks.map((risk) => risk.type),
     ['highlights', 'shadows', 'saturation'],
   )
+})
+
+test('applyAdjustmentsWithRisks returns adjusted pixels and preview risks in one pass', () => {
+  const data = new Uint8ClampedArray([
+    250, 250, 250, 255,
+    1, 1, 1, 255,
+    255, 0, 0, 255,
+    120, 120, 120, 255,
+  ])
+  const result = applyAdjustmentsWithRisks(
+    { data, width: 2, height: 2 } as ImageData,
+    {
+      ...DEFAULT_ADJUSTMENTS,
+      brightness: 10,
+      contrast: 10,
+      saturation: 10,
+    },
+  )
+
+  assert.equal(result.imageData.data, data)
+  assert.ok(result.risks.some((risk) => risk.type === 'highlights'))
+  assert.ok(result.risks.some((risk) => risk.type === 'saturation'))
 })

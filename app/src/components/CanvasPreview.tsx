@@ -18,19 +18,21 @@ import {
 } from 'lucide-react'
 import type { ImageAsset } from '../lib/imageAsset'
 import {
-  detectPreviewRisks,
   type AdjustmentValues,
   type PreviewRisk,
 } from '../lib/imageAdjustments'
-import { processImageDataInWorker } from '../lib/adjustmentWorkerClient'
+import { processImageDataWithRisksInWorker } from '../lib/adjustmentWorkerClient'
 import {
   createExportFilename,
   downloadBlob,
+  type ExportQuality,
   renderAdjustedImageBlob,
 } from '../lib/imageExport'
 
 const MAX_RENDER_EDGE = 1800
-const PREVIEW_RENDER_DELAY_MS = 45
+const FAST_RENDER_EDGE = 720
+const FAST_PREVIEW_RENDER_DELAY_MS = 30
+const FINAL_PREVIEW_RENDER_DELAY_MS = 180
 
 export type PreviewMode = 'adjusted' | 'original' | 'side-by-side' | 'split'
 export type PreviewRenderStatus =
@@ -46,10 +48,18 @@ interface CanvasPreviewProps {
   mode: PreviewMode
   risks?: PreviewRisk[]
   renderStatus?: PreviewRenderStatus
+  exportQuality?: ExportQuality
+  exportMaxEdge?: number
   onModeChange: (mode: PreviewMode) => void
   onPreview?: (image: ImageAsset) => void
   onRenderStatusChange?: (status: PreviewRenderStatus) => void
   onRisksChange?: (risks: PreviewRisk[]) => void
+  onRenderMetric?: (metric: {
+    pass: 'fast' | 'final'
+    durationMs: number
+    width: number
+    height: number
+  }) => void
 }
 
 export function CanvasPreview({
@@ -58,13 +68,17 @@ export function CanvasPreview({
   mode,
   risks = [],
   renderStatus,
+  exportQuality = 'standard',
+  exportMaxEdge = 4096,
   onModeChange,
   onPreview,
   onRenderStatusChange,
   onRisksChange,
+  onRenderMetric,
 }: CanvasPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sourcePixelsRef = useRef<ImageData | null>(null)
+  const fastSourcePixelsRef = useRef<ImageData | null>(null)
   const renderSeqRef = useRef(0)
   const [localStatus, setLocalStatus] = useState<PreviewRenderStatus>('idle')
   const [sourceVersion, setSourceVersion] = useState(0)
@@ -81,6 +95,7 @@ export function CanvasPreview({
   useEffect(() => {
     const canvas = canvasRef.current
     sourcePixelsRef.current = null
+    fastSourcePixelsRef.current = null
     onRisksChange?.([])
 
     if (!canvas || !image) {
@@ -94,6 +109,7 @@ export function CanvasPreview({
     source.onload = () => {
       if (cancelled) return
       const scale = Math.min(1, MAX_RENDER_EDGE / Math.max(source.width, source.height))
+      const fastScale = Math.min(1, FAST_RENDER_EDGE / Math.max(source.width, source.height))
       canvas.width = Math.max(1, Math.round(source.width * scale))
       canvas.height = Math.max(1, Math.round(source.height * scale))
       const context = canvas.getContext('2d', { willReadFrequently: true })
@@ -111,6 +127,21 @@ export function CanvasPreview({
         canvas.width,
         canvas.height,
       )
+      const fastCanvas = document.createElement('canvas')
+      fastCanvas.width = Math.max(1, Math.round(source.width * fastScale))
+      fastCanvas.height = Math.max(1, Math.round(source.height * fastScale))
+      const fastContext = fastCanvas.getContext('2d', { willReadFrequently: true })
+      if (fastContext) {
+        fastContext.fillStyle = '#ffffff'
+        fastContext.fillRect(0, 0, fastCanvas.width, fastCanvas.height)
+        fastContext.drawImage(source, 0, 0, fastCanvas.width, fastCanvas.height)
+        fastSourcePixelsRef.current = fastContext.getImageData(
+          0,
+          0,
+          fastCanvas.width,
+          fastCanvas.height,
+        )
+      }
       setSourceVersion((current) => current + 1)
     }
     source.onerror = () => {
@@ -127,42 +158,80 @@ export function CanvasPreview({
   useEffect(() => {
     const canvas = canvasRef.current
     const sourcePixels = sourcePixelsRef.current
+    const fastSourcePixels = fastSourcePixelsRef.current
     if (!canvas || !sourcePixels || !image) return
 
     const sequence = renderSeqRef.current + 1
     renderSeqRef.current = sequence
-    const controller = new AbortController()
-    const timer = window.setTimeout(async () => {
+    const fastController = new AbortController()
+    const finalController = new AbortController()
+
+    const renderPixels = async (
+      pixels: ImageData,
+      controller: AbortController,
+      finalPass: boolean,
+    ) => {
       try {
+        const startedAt = performance.now()
         updateStatus('rendering')
-        const adjusted = await processImageDataInWorker(
-          sourcePixels,
+        const adjusted = await processImageDataWithRisksInWorker(
+          pixels,
           adjustments,
           controller.signal,
         )
         if (renderSeqRef.current !== sequence) return
         const context = canvas.getContext('2d')
-        context?.putImageData(adjusted, 0, 0)
-        onRisksChange?.(detectPreviewRisks(adjusted, adjustments))
-        updateStatus('ready')
+        if (context) {
+          if (finalPass) {
+            context.putImageData(adjusted.imageData, 0, 0)
+          } else {
+            const fastCanvas = document.createElement('canvas')
+            fastCanvas.width = adjusted.imageData.width
+            fastCanvas.height = adjusted.imageData.height
+            fastCanvas.getContext('2d')?.putImageData(adjusted.imageData, 0, 0)
+            context.imageSmoothingEnabled = true
+            context.imageSmoothingQuality = 'medium'
+            context.drawImage(fastCanvas, 0, 0, canvas.width, canvas.height)
+          }
+        }
+        onRisksChange?.(adjusted.risks)
+        onRenderMetric?.({
+          pass: finalPass ? 'final' : 'fast',
+          durationMs: performance.now() - startedAt,
+          width: adjusted.imageData.width,
+          height: adjusted.imageData.height,
+        })
+        if (finalPass) updateStatus('ready')
       } catch (error) {
         if (!(error instanceof DOMException && error.name === 'AbortError')) {
           updateStatus('error')
         }
       }
-    }, PREVIEW_RENDER_DELAY_MS)
+    }
+
+    const fastTimer = window.setTimeout(() => {
+      void renderPixels(fastSourcePixels ?? sourcePixels, fastController, false)
+    }, FAST_PREVIEW_RENDER_DELAY_MS)
+    const finalTimer = window.setTimeout(() => {
+      void renderPixels(sourcePixels, finalController, true)
+    }, FINAL_PREVIEW_RENDER_DELAY_MS)
 
     return () => {
-      window.clearTimeout(timer)
-      controller.abort()
+      window.clearTimeout(fastTimer)
+      window.clearTimeout(finalTimer)
+      fastController.abort()
+      finalController.abort()
     }
-  }, [adjustments, image, onRisksChange, sourceVersion, updateStatus])
+  }, [adjustments, image, onRenderMetric, onRisksChange, sourceVersion, updateStatus])
 
   const exportImage = async () => {
     if (!image || exporting) return
     setExporting(true)
     try {
-      const blob = await renderAdjustedImageBlob(image, adjustments)
+      const blob = await renderAdjustedImageBlob(image, adjustments, {
+        quality: exportQuality,
+        maxEdge: exportMaxEdge,
+      })
       downloadBlob(blob, createExportFilename(image.file.name))
     } finally {
       setExporting(false)

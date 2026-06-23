@@ -15,11 +15,20 @@ import type {
   AdjustmentValues,
 } from '../lib/imageAdjustments'
 import { createImageAsset, type ImageAsset } from '../lib/imageAsset'
+import type { ExportQuality } from '../lib/imageExport'
 
 export const MAX_BATCH_IMAGES = 20
 export const MAX_BATCH_TOTAL_SIZE = 200 * 1024 * 1024
 
-export type BatchExportStatus = 'idle' | 'processing' | 'done' | 'error'
+export type BatchExportStatus =
+  | 'idle'
+  | 'queued'
+  | 'decoding'
+  | 'processing'
+  | 'encoding'
+  | 'packaging'
+  | 'done'
+  | 'error'
 export type BatchAnalysisStatus = 'idle' | 'loading' | 'success' | 'error'
 export type BatchFilter = 'all' | 'selected' | 'customized' | 'error'
 
@@ -39,7 +48,11 @@ interface BatchImageQueueProps {
   selectedId: string | null
   exporting: boolean
   exportMessage: string
+  exportQuality: ExportQuality
+  exportMaxEdge: number
   filter: BatchFilter
+  onExportQualityChange: (quality: ExportQuality) => void
+  onExportMaxEdgeChange: (maxEdge: number) => void
   onFilterChange: (filter: BatchFilter) => void
   onAdd: (assets: ImageAsset[]) => void
   onSelect: (id: string) => void
@@ -61,7 +74,11 @@ export function BatchImageQueue({
   selectedId,
   exporting,
   exportMessage,
+  exportQuality,
+  exportMaxEdge,
   filter,
+  onExportQualityChange,
+  onExportMaxEdgeChange,
   onFilterChange,
   onAdd,
   onSelect,
@@ -225,6 +242,35 @@ export function BatchImageQueue({
         ))}
       </div>
 
+      <div className="export-options" aria-label="导出配置">
+        <label>
+          <span>质量</span>
+          <select
+            value={exportQuality}
+            onChange={(event) =>
+              onExportQualityChange(event.target.value as ExportQuality)
+            }
+            disabled={exporting}
+          >
+            <option value="high">高质量</option>
+            <option value="standard">标准</option>
+            <option value="light">轻量</option>
+          </select>
+        </label>
+        <label>
+          <span>最长边</span>
+          <select
+            value={exportMaxEdge}
+            onChange={(event) => onExportMaxEdgeChange(Number(event.target.value))}
+            disabled={exporting}
+          >
+            <option value={4096}>4096</option>
+            <option value={3000}>3000</option>
+            <option value={2000}>2000</option>
+          </select>
+        </label>
+      </div>
+
       <input
         ref={inputRef}
         className="visually-hidden"
@@ -326,7 +372,20 @@ function ExportState({
   error?: string
 }) {
   if (status === 'processing') {
-    return <LoaderCircle size={15} className="spin batch-state" aria-label="处理中" />
+    return (
+      <span className="batch-state-label active">
+        <LoaderCircle size={14} className="spin" />
+        处理
+      </span>
+    )
+  }
+  if (status === 'queued' || status === 'decoding' || status === 'encoding' || status === 'packaging') {
+    return (
+      <span className="batch-state-label active">
+        <LoaderCircle size={14} className="spin" />
+        {exportStatusLabel(status)}
+      </span>
+    )
   }
   if (status === 'done') {
     return <CheckCircle size={15} className="batch-state success" aria-label="已导出" />
@@ -345,6 +404,11 @@ function StatusTags({ item }: { item: BatchImageItem }) {
   if (item.analysisStatus === 'success') tags.push('AI 已生成')
   if (item.analysisStatus === 'error') tags.push('AI 失败')
   if (item.exportStatus === 'error') tags.push('导出失败')
+  if (item.exportStatus === 'queued') tags.push('等待导出')
+  if (item.exportStatus === 'decoding') tags.push('解码中')
+  if (item.exportStatus === 'processing') tags.push('处理中')
+  if (item.exportStatus === 'encoding') tags.push('编码中')
+  if (item.exportStatus === 'packaging') tags.push('打包中')
   if (!tags.length) return null
 
   return (
@@ -357,6 +421,15 @@ function StatusTags({ item }: { item: BatchImageItem }) {
       ))}
     </span>
   )
+}
+
+function exportStatusLabel(status: BatchExportStatus) {
+  if (status === 'queued') return '等待'
+  if (status === 'decoding') return '解码'
+  if (status === 'encoding') return '编码'
+  if (status === 'packaging') return '打包'
+  if (status === 'processing') return '处理'
+  return ''
 }
 
 function sourceLabel(source: AdjustmentSource) {

@@ -5,8 +5,8 @@ export interface EncodedImagePayload {
   data: string
 }
 
-const MAX_ANALYSIS_EDGE = 1280
-const ANALYSIS_QUALITY = 0.82
+const MAX_ANALYSIS_EDGE = 896
+const ANALYSIS_QUALITY = 0.72
 
 export async function encodeImageForAnalysis(
   image: ImageAsset,

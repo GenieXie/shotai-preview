@@ -87,6 +87,11 @@ export interface PreviewRisk {
   suggestion: string
 }
 
+export interface AdjustmentProcessResult {
+  imageData: ImageData
+  risks: PreviewRisk[]
+}
+
 export const DEFAULT_ADJUSTMENTS: AdjustmentValues = {
   exposure: 0,
   brightness: 0,
@@ -200,12 +205,31 @@ export function applyAdjustments(
   imageData: ImageData,
   adjustments: AdjustmentValues,
 ) {
+  processAdjustments(imageData, adjustments, false)
+}
+
+export function applyAdjustmentsWithRisks(
+  imageData: ImageData,
+  adjustments: AdjustmentValues,
+): AdjustmentProcessResult {
+  return processAdjustments(imageData, adjustments, true)
+}
+
+function processAdjustments(
+  imageData: ImageData,
+  adjustments: AdjustmentValues,
+  collectRisks: boolean,
+): AdjustmentProcessResult {
   const data = imageData.data
   const width = imageData.width || 1
   const height = imageData.height || Math.max(1, data.length / 4 / width)
   const centerX = width / 2
   const centerY = height / 2
   const maxDistance = Math.sqrt(centerX * centerX + centerY * centerY) || 1
+  const totalPixels = Math.max(1, data.length / 4)
+  let clippedHighlights = 0
+  let crushedShadows = 0
+  let saturatedPixels = 0
 
   const exposure = adjustments.exposure * 1.0
   const brightness = adjustments.brightness * 0.7
@@ -263,9 +287,49 @@ export function applyAdjustments(
     const grainShift = grain ? deterministicNoise(pixel) * grain : 0
     const vignetteShift = -vignette * edgeWeight
 
-    data[index] = clamp(red + tonalShift + detailShift + grainShift + vignetteShift)
-    data[index + 1] = clamp(green + tonalShift + detailShift + grainShift + vignetteShift)
-    data[index + 2] = clamp(blue + tonalShift + detailShift + grainShift + vignetteShift)
+    const adjustedRed = clamp(red + tonalShift + detailShift + grainShift + vignetteShift)
+    const adjustedGreen = clamp(green + tonalShift + detailShift + grainShift + vignetteShift)
+    const adjustedBlue = clamp(blue + tonalShift + detailShift + grainShift + vignetteShift)
+
+    data[index] = adjustedRed
+    data[index + 1] = adjustedGreen
+    data[index + 2] = adjustedBlue
+
+    if (collectRisks) {
+      const riskLuminance =
+        0.299 * adjustedRed + 0.587 * adjustedGreen + 0.114 * adjustedBlue
+      const max = Math.max(adjustedRed, adjustedGreen, adjustedBlue)
+      const min = Math.min(adjustedRed, adjustedGreen, adjustedBlue)
+
+      if (
+        riskLuminance >= 248 ||
+        (adjustedRed >= 250 && adjustedGreen >= 250 && adjustedBlue >= 250)
+      ) {
+        clippedHighlights += 1
+      }
+      if (
+        riskLuminance <= 7 ||
+        (adjustedRed <= 6 && adjustedGreen <= 6 && adjustedBlue <= 6)
+      ) {
+        crushedShadows += 1
+      }
+      if (max >= 245 && max - min >= 225) {
+        saturatedPixels += 1
+      }
+    }
+  }
+
+  return {
+    imageData,
+    risks: collectRisks
+      ? buildPreviewRisks(
+          clippedHighlights,
+          crushedShadows,
+          saturatedPixels,
+          totalPixels,
+          adjustments,
+        )
+      : [],
   }
 }
 
@@ -298,6 +362,22 @@ export function detectPreviewRisks(
     }
   }
 
+  return buildPreviewRisks(
+    clippedHighlights,
+    crushedShadows,
+    saturatedPixels,
+    totalPixels,
+    adjustments,
+  )
+}
+
+function buildPreviewRisks(
+  clippedHighlights: number,
+  crushedShadows: number,
+  saturatedPixels: number,
+  totalPixels: number,
+  adjustments: AdjustmentValues,
+): PreviewRisk[] {
   const risks: PreviewRisk[] = []
   if (clippedHighlights / totalPixels >= 0.08) {
     risks.push({
