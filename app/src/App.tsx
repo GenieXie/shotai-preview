@@ -84,6 +84,7 @@ import {
 import { getAdjustmentWorkerSnapshot } from './lib/adjustmentWorkerClient'
 import { createImageAsset, type ImageAsset } from './lib/imageAsset'
 import { readExif, exifEntries, type ExifInfo } from './lib/exif'
+import { beforeAnalysisToAdjustments } from './lib/beforeMapping'
 import { createZipBlob } from './lib/zipExport'
 
 // V3.0：可在页面切换的 Gemini 模型（与后端白名单一致）
@@ -2285,35 +2286,6 @@ function analysisRecoveryHint(code: AnalysisErrorCode | null) {
   if (code === 'quota') return '请降低请求频率，或检查 Gemini API 额度。'
   if (code === 'cancelled') return '分析已取消，当前图片和参数已保留。'
   return '当前图片和参数已保留，可重新分析。'
-}
-
-// V3.0 拍前→拍后闭环：把拍前分析的视觉方向映射成一组拍后起始调色参数（启发式，作为起点）
-function beforeAnalysisToAdjustments(result: BeforeAnalysisResult): AdjustmentValues {
-  const vd = result.visualDimensions
-  const text = [
-    vd.colorTendency,
-    vd.temperature,
-    vd.contrast,
-    vd.tone,
-    vd.saturation,
-    result.lighting,
-  ].join(' ')
-  const has = (...kw: string[]) => kw.some((k) => text.includes(k))
-  const adj: AdjustmentValues = { ...DEFAULT_ADJUSTMENTS }
-  if (has('冷')) adj.temperature = -15
-  else if (has('暖')) adj.temperature = 15
-  if (has('高对比', '高反差', '强对比', '硬光')) adj.contrast = 18
-  else if (has('低对比', '低反差', '柔和', '平淡')) adj.contrast = -10
-  if (has('低饱和', '淡', '去饱和')) adj.saturation = -14
-  else if (has('高饱和', '浓郁', '鲜艳', '艳丽')) adj.saturation = 14
-  if (has('通透', '明亮', '高调', '空气感')) {
-    adj.exposure = 6
-    adj.vibrance = 8
-  } else if (has('暗调', '低调', '深沉', '压暗')) {
-    adj.exposure = -8
-    adj.contrast = Math.max(adj.contrast, 8)
-  }
-  return adj
 }
 
 function describeAdjustmentSource(source: AdjustmentSource | null): string {

@@ -12,7 +12,7 @@
     "start": "node --use-env-proxy --env-file-if-exists=.env.local server/shotai-api.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "test": "node --experimental-strip-types --test tests/*.test.ts tests/*.test.mjs",
+    "test": "tsx --test tests/*.test.ts tests/*.test.mjs",
     "verify": "npm run lint && npm run test && npm run build && node --check server/shotai-api.mjs",
     "preview": "vite preview"
   },
@@ -32,6 +32,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
+    "tsx": "^4.22.4",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
     "vite": "^8.0.12"
