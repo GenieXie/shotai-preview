@@ -7,7 +7,6 @@ import {
   CheckCircle,
   Clipboard,
   ClipboardCheck,
-  FolderOpen,
   Grid2X2,
   History,
   ImageIcon,
@@ -1209,19 +1208,15 @@ function App() {
         <nav className="global-nav" aria-label="全局导航">
           <button type="button" className={activeTab === 'before' ? 'active' : ''} onClick={() => setActiveTab('before')}>
             <Camera size={16} />
-            拍前分析
+            拍前参考
           </button>
           <button type="button" className={activeTab === 'after' ? 'active' : ''} onClick={() => setActiveTab('after')}>
             <SlidersHorizontal size={16} />
-            拍后调色
-          </button>
-          <button type="button">
-            <FolderOpen size={15} />
-            项目
+            调色工作台
           </button>
           <button type="button">
             <Grid2X2 size={15} />
-            预设
+            预设中心
           </button>
           <button type="button">
             <History size={15} />
@@ -1428,32 +1423,29 @@ function App() {
                 {sessionMessage && (
                   <StatusMessage tone="success">{sessionMessage}</StatusMessage>
                 )}
-                <div className="scope-options">
-                  <label>
-                    <input
-                      type="radio"
-                      checked={applyScope === 'current'}
-                      onChange={() => setApplyScope('current')}
-                    />
-                    仅当前图片
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      checked={applyScope === 'selected'}
-                      disabled={!selectedCount}
-                      onChange={() => setApplyScope('selected')}
-                    />
-                    选中图片 {selectedCount ? `(${selectedCount})` : ''}
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      checked={applyScope === 'all'}
-                      onChange={() => setApplyScope('all')}
-                    />
-                    全部图片
-                  </label>
+                <div className="scope-segmented" role="group" aria-label="当前作用范围">
+                  <button
+                    type="button"
+                    className={applyScope === 'current' ? 'active' : ''}
+                    onClick={() => setApplyScope('current')}
+                  >
+                    当前图
+                  </button>
+                  <button
+                    type="button"
+                    className={applyScope === 'selected' ? 'active' : ''}
+                    disabled={!selectedCount}
+                    onClick={() => setApplyScope('selected')}
+                  >
+                    选中图{selectedCount ? ` (${selectedCount})` : ''}
+                  </button>
+                  <button
+                    type="button"
+                    className={applyScope === 'all' ? 'active' : ''}
+                    onClick={() => setApplyScope('all')}
+                  >
+                    全部
+                  </button>
                 </div>
               </section>
 

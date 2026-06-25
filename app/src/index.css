@@ -282,6 +282,37 @@ button:disabled {
   font-weight: 400;
 }
 
+/* V3.0 作用范围分段控件 */
+.scope-segmented {
+  display: flex;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-muted);
+  padding: 3px;
+}
+.scope-segmented button {
+  flex: 1;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  padding: 7px 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  color: #59615e;
+  cursor: pointer;
+}
+.scope-segmented button.active {
+  background: #fff;
+  color: var(--accent-dark);
+  border-color: #c8d5d0;
+}
+.scope-segmented button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 main {
   max-width: 1500px;
   margin: 0 auto;
