@@ -2,7 +2,7 @@
 
 ## 3.0.0 - 2026-06-25
 
-Shotai V3.0 (first wave: model switching + AI tuning):
+Shotai V3.0 — AI 精修, model switching, and a rebuilt pre-shoot workbench:
 
 - Adds a page-level AI model selector in the top bar. Users can switch between
   `gemini-3.1-pro-preview`, `gemini-3.5-flash`, `gemini-3.1-flash-lite`
@@ -11,17 +11,24 @@ Shotai V3.0 (first wave: model switching + AI tuning):
   allowlist and falls back to the default otherwise. Previously the model could
   only be changed via the `GEMINI_MODEL` env var on the server.
 - Raises Gemini `temperature` from 0.2 (color) / 0.3 (before-shoot) to 0.8.
-- Lets AI apply strength go from 0–100% up to 0–200% (adds 125% / 150% presets
-  and extends the slider), so users can push AI/preset effects beyond 100%.
+- Lets AI apply strength go from 0–100% up to 0–200% (adds 125% / 150% / 200%
+  presets and extends the slider), so users can push AI/preset effects beyond 100%.
 - Loosens the AI adjustment safety scaling (was halve-then-cap, which made AI
   edits feel too weak): scale 0.5 → 0.85 and caps raised ~1.8×. Values are
   tunable knobs in `imageAdjustments.ts`.
-- Renames the scope control label "同步范围" to "当前作用范围".
-
-> Not yet in this wave: the natural-language "AI 精修" module and the pre-shoot
-> workbench overhaul (multi-reference queue, structured visual analysis, EXIF
-> extraction, send-to-post-shoot). Prototyped in `v3-prototype/`, to be built
-> next.
+- Adds the natural-language **AI 精修** module (拍后): type an instruction (e.g.
+  “再冷一点，但保留肤色”), get a clamped adjustment delta, then 预览 / 应用 /
+  撤回上一轮. Single-round; results are retained and cached per image+instruction.
+- Disambiguates reversal now that there are two AI sources: undo/redo steps are
+  labeled by source (撤销：AI 精修 / 手动调整 …) and the old “恢复 AI” is split into
+  恢复调色建议 / 恢复精修 / 恢复预设.
+- 拍后 IA: top nav trimmed to 拍前参考 / 调色工作台 / 预设中心 / 历史记录; the
+  scope control is now a segmented 当前图 / 选中图 / 全部.
+- Rebuilds the **拍前 workbench**: a multi-reference queue (pick one to analyze),
+  a large preview of the selected reference, EXIF extraction
+  (camera / ISO / focal / aperture / shutter / exposure via `exifr`, no AI), a
+  structured 6-dimension visual analysis, and a 拍前 → 拍后 闭环
+  (保存为拍后预设 / 发送到拍后调色).
 
 ## 2.3.1 - 2026-06-21
 
