@@ -101,6 +101,12 @@ type ApiHealth = 'checking' | 'ready' | 'degraded' | 'offline'
 type ApplyScope = 'current' | 'selected' | 'all'
 type AnalysisCacheSource = 'fresh' | 'cached' | null
 
+// V3.0：带来源标签的撤销/重做条目（消除 AI 与手动混淆）
+interface HistoryEntry {
+  values: AdjustmentValues
+  label: string
+}
+
 interface PerformanceMetric {
   label: string
   durationMs: number
@@ -202,8 +208,8 @@ function App() {
   const [globalAdjustmentSource, setGlobalAdjustmentSource] =
     useState<AdjustmentSource | null>(null)
   const [applyScope, setApplyScope] = useState<ApplyScope>('current')
-  const [historyPast, setHistoryPast] = useState<AdjustmentValues[]>([])
-  const [historyFuture, setHistoryFuture] = useState<AdjustmentValues[]>([])
+  const [historyPast, setHistoryPast] = useState<HistoryEntry[]>([])
+  const [historyFuture, setHistoryFuture] = useState<HistoryEntry[]>([])
   const [customPresets, setCustomPresets] = useState<StylePreset[]>(() =>
     loadCustomPresets(),
   )
@@ -241,6 +247,14 @@ function App() {
     useState<AdjustmentValues | null>(null)
   const refineSentImageRef = useRef<ImageAsset | null>(null)
   const refineControllerRef = useRef<AbortController | null>(null)
+  // 最近一次精修的结果参数（命名恢复锚点："恢复精修"）
+  const [lastRefineAdjustments, setLastRefineAdjustments] =
+    useState<AdjustmentValues | null>(null)
+  // 按图片缓存精修结果（同一图、同一指令不再重复调用）
+  const refineCacheRef = useRef<{ image: ImageAsset | null; map: Map<string, RefineResult> }>({
+    image: null,
+    map: new Map(),
+  })
   const [beforeStatus, setBeforeStatus] = useState<AnalysisStatus>('idle')
   const [beforeError, setBeforeError] = useState('')
   const [beforeResult, setBeforeResult] = useState<BeforeAnalysisResult | null>(
@@ -542,8 +556,8 @@ function App() {
     setBeforeCopied(false)
   }
 
-  const remember = (value = currentAdjustments) => {
-    setHistoryPast((current) => [...current.slice(-49), value])
+  const remember = (label: string, value = currentAdjustments) => {
+    setHistoryPast((current) => [...current.slice(-49), { values: value, label }])
     setHistoryFuture([])
   }
 
@@ -553,11 +567,14 @@ function App() {
       recordHistory?: boolean
       scope?: ApplyScope
       source?: AdjustmentSource | null
+      label?: string
     } = {},
   ) => {
     const scope = options.scope ?? applyScope
     const source = options.source ?? currentAdjustmentSource
-    if (options.recordHistory !== false) remember()
+    if (options.recordHistory !== false) {
+      remember(options.label ?? describeAdjustmentSource(source))
+    }
 
     if (scope === 'all') {
       setGlobalAdjustments(next)
@@ -798,7 +815,7 @@ function App() {
   }
 
   const resetAdjustments = () => {
-    applyAdjustmentsToScope(DEFAULT_ADJUSTMENTS, { source: null })
+    applyAdjustmentsToScope(DEFAULT_ADJUSTMENTS, { source: null, label: '重置' })
     setActivePresetId(null)
     setPresetModified(false)
     setPresetMessage('已重置当前作用范围的调色参数。')
@@ -829,8 +846,10 @@ function App() {
     const previous = historyPast.at(-1)
     if (!previous) return
     setHistoryPast((current) => current.slice(0, -1))
-    setHistoryFuture((current) => [currentAdjustments, ...current].slice(0, 50))
-    applyAdjustmentsToScope(previous, {
+    setHistoryFuture((current) =>
+      [{ values: currentAdjustments, label: previous.label }, ...current].slice(0, 50),
+    )
+    applyAdjustmentsToScope(previous.values, {
       recordHistory: false,
       scope: 'current',
       source: getManualSource(currentAdjustmentSource),
@@ -841,8 +860,11 @@ function App() {
     const next = historyFuture[0]
     if (!next) return
     setHistoryFuture((current) => current.slice(1))
-    setHistoryPast((current) => [...current.slice(-49), currentAdjustments])
-    applyAdjustmentsToScope(next, {
+    setHistoryPast((current) => [
+      ...current.slice(-49),
+      { values: currentAdjustments, label: next.label },
+    ])
+    applyAdjustmentsToScope(next.values, {
       recordHistory: false,
       scope: 'current',
       source: getManualSource(currentAdjustmentSource),
@@ -1072,7 +1094,7 @@ function App() {
 
   const restoreAiSnapshot = () => {
     if (!aiSnapshot) return
-    applyAdjustmentsToScope(aiSnapshot, { source: null })
+    applyAdjustmentsToScope(aiSnapshot, { source: null, label: '恢复分析前' })
     setPresetMessage('已恢复 AI 分析前的参数。')
   }
 
@@ -1088,6 +1110,19 @@ function App() {
       applyAdjustmentsToScope(refinePreviewBaseline, { recordHistory: false })
       setRefinePreviewBaseline(null)
     }
+    // 换图时重置缓存与"已传图"标记
+    if (refineCacheRef.current.image !== userImage) {
+      refineCacheRef.current = { image: userImage, map: new Map() }
+      refineSentImageRef.current = null
+    }
+    // 命中缓存：同图同指令直接返回，不再调用
+    const cached = refineCacheRef.current.map.get(instruction)
+    if (cached) {
+      setRefineSuggestion(cached)
+      setRefineStatus('success')
+      setRefineError('')
+      return
+    }
     setRefineStatus('loading')
     setRefineError('')
     const controller = new AbortController()
@@ -1102,6 +1137,7 @@ function App() {
         { model: selectedModel, signal: controller.signal },
       )
       if (sendImage) refineSentImageRef.current = userImage
+      refineCacheRef.current.map.set(instruction, result)
       setRefineSuggestion(result)
       setRefineStatus('success')
     } catch (error) {
@@ -1129,27 +1165,33 @@ function App() {
 
   const applyRefine = () => {
     if (!refineSuggestion) return
+    let applied: AdjustmentValues
     if (refinePreviewBaseline) {
-      // 预览时实时值已是 baseline+delta；把 baseline 记入历史，撤回即可回到 baseline
-      remember(refinePreviewBaseline)
+      // 预览时实时值已是 baseline+delta；把 baseline 以"AI 精修"标签记入历史，撤回即回到 baseline
+      applied = addRefineDelta(refinePreviewBaseline, refineSuggestion.changes)
+      remember('AI 精修', refinePreviewBaseline)
       setRefinePreviewBaseline(null)
     } else {
-      applyAdjustmentsToScope(
-        addRefineDelta(currentAdjustments, refineSuggestion.changes),
-        { source: 'ai' },
-      )
+      applied = addRefineDelta(currentAdjustments, refineSuggestion.changes)
+      applyAdjustmentsToScope(applied, { source: 'ai', label: 'AI 精修' })
     }
+    setLastRefineAdjustments(applied)
     setActivePresetId(null)
     setPresetModified(false)
     setPresetMessage('已应用 AI 精修建议。')
-    setRefineSuggestion(null)
-    setRefineInstruction('')
+    // 保留 refineSuggestion 与指令：可再次应用 / 查看（你要的"可缓存、可返回"）
   }
 
   const undoRefine = () => {
     setRefinePreviewBaseline(null)
-    setRefineSuggestion(null)
     undoAdjustments()
+  }
+
+  // 命名恢复锚点："恢复到上次 AI 精修结果"
+  const restoreRefine = () => {
+    if (!lastRefineAdjustments) return
+    applyAdjustmentsToScope(lastRefineAdjustments, { source: 'ai', label: '恢复精修' })
+    setPresetMessage('已恢复到上次 AI 精修结果。')
   }
 
   const runBeforeAnalysis = async () => {
@@ -1640,6 +1682,10 @@ function App() {
                 onResetAll={resetAdjustments}
                 onRestoreAi={() => aiAnalysis && applyAdjustmentsToScope(aiAnalysis.adjustments, { source: 'ai' })}
                 onRestorePreset={() => activePresetValues && applyAdjustmentsToScope(activePresetValues, { source: 'preset' })}
+                refineValues={lastRefineAdjustments}
+                onRestoreRefine={restoreRefine}
+                undoLabel={historyPast.at(-1)?.label}
+                redoLabel={historyFuture[0]?.label}
                 onUndo={undoAdjustments}
                 onRedo={redoAdjustments}
               />
@@ -1718,7 +1764,7 @@ function AiSuggestionCard({
       <article className="ai-strength-card">
         <h3>应用强度</h3>
         <div className="ai-strength-actions" aria-label="AI 应用强度">
-          {[25, 50, 100, 125, 150].map((value) => (
+          {[25, 50, 100, 125, 150, 200].map((value) => (
             <button
               key={value}
               type="button"
@@ -2089,6 +2135,19 @@ function analysisRecoveryHint(code: AnalysisErrorCode | null) {
   if (code === 'quota') return '请降低请求频率，或检查 Gemini API 额度。'
   if (code === 'cancelled') return '分析已取消，当前图片和参数已保留。'
   return '当前图片和参数已保留，可重新分析。'
+}
+
+function describeAdjustmentSource(source: AdjustmentSource | null): string {
+  switch (source) {
+    case 'ai':
+      return 'AI 调色建议'
+    case 'preset':
+      return '预设'
+    case 'manual':
+      return '手动调整'
+    default:
+      return '调整'
+  }
 }
 
 function getManualSource(source: AdjustmentSource | null): AdjustmentSource {

@@ -45,6 +45,7 @@ interface AdjustmentPanelProps {
   values: AdjustmentValues
   aiValues?: AdjustmentValues | null
   presetValues?: AdjustmentValues | null
+  refineValues?: AdjustmentValues | null
   canUndo: boolean
   canRedo: boolean
   onChange: (values: AdjustmentValues) => void
@@ -52,15 +53,19 @@ interface AdjustmentPanelProps {
   onResetGroup: (groupId: AdjustmentGroupId) => void
   onResetAll: () => void
   onRestoreAi: () => void
+  onRestoreRefine: () => void
   onRestorePreset: () => void
   onUndo: () => void
   onRedo: () => void
+  undoLabel?: string
+  redoLabel?: string
 }
 
 export function AdjustmentPanel({
   values,
   aiValues,
   presetValues,
+  refineValues,
   canUndo,
   canRedo,
   onChange,
@@ -68,9 +73,12 @@ export function AdjustmentPanel({
   onResetGroup,
   onResetAll,
   onRestoreAi,
+  onRestoreRefine,
   onRestorePreset,
   onUndo,
   onRedo,
+  undoLabel,
+  redoLabel,
 }: AdjustmentPanelProps) {
   const updateValue = (key: AdjustmentKey, value: number) => {
     onChange({ ...values, [key]: normalizeAdjustment(value) })
@@ -79,22 +87,42 @@ export function AdjustmentPanel({
   return (
     <section className="adjustment-panel">
       <div className="adjustment-actions" aria-label="参数组操作">
-        <button type="button" onClick={onUndo} disabled={!canUndo}>
+        <button
+          type="button"
+          onClick={onUndo}
+          disabled={!canUndo}
+          title={canUndo && undoLabel ? `撤销：${undoLabel}` : '撤销'}
+        >
           撤销
         </button>
-        <button type="button" onClick={onRedo} disabled={!canRedo}>
+        <button
+          type="button"
+          onClick={onRedo}
+          disabled={!canRedo}
+          title={canRedo && redoLabel ? `重做：${redoLabel}` : '重做'}
+        >
           重做
         </button>
         <button type="button" onClick={onResetAll}>
           全部归零
         </button>
         <button type="button" onClick={onRestoreAi} disabled={!aiValues}>
-          恢复 AI
+          恢复调色建议
+        </button>
+        <button type="button" onClick={onRestoreRefine} disabled={!refineValues}>
+          恢复精修
         </button>
         <button type="button" onClick={onRestorePreset} disabled={!presetValues}>
           恢复预设
         </button>
       </div>
+      {(undoLabel || redoLabel) && (
+        <small className="history-hint">
+          {undoLabel ? `上一步：${undoLabel}` : ''}
+          {undoLabel && redoLabel ? ' · ' : ''}
+          {redoLabel ? `下一步：${redoLabel}` : ''}
+        </small>
+      )}
 
       <div className="adjustment-list">
         {ADJUSTMENT_GROUPS.map((group) => (

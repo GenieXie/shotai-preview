@@ -313,6 +313,13 @@ button:disabled {
   cursor: not-allowed;
 }
 
+.history-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
 main {
   max-width: 1500px;
   margin: 0 auto;
