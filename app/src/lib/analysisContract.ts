@@ -29,12 +29,22 @@ export interface ColorAnalysisResult {
   confidence: number
 }
 
+export interface BeforeVisualDimensions {
+  colorTendency: string
+  lightDirection: string
+  contrast: string
+  tone: string
+  temperature: string
+  saturation: string
+}
+
 export interface BeforeAnalysisResult {
   scene: string
   lighting: string
   composition: string
   cameraSettings: string[]
   executionTips: string[]
+  visualDimensions: BeforeVisualDimensions
   confidence: number
   uncertainty: string
 }
@@ -96,6 +106,7 @@ export function normalizeBeforeAnalysis(value: unknown): BeforeAnalysisResult {
     composition: normalizeText(record.composition, '未能识别构图信息。'),
     cameraSettings: normalizeStringArray(record.cameraSettings, []),
     executionTips: normalizeStringArray(record.executionTips, []),
+    visualDimensions: normalizeVisualDimensions(record.visualDimensions),
     confidence:
       typeof record.confidence === 'number'
         ? Math.max(0, Math.min(1, record.confidence))
@@ -104,6 +115,19 @@ export function normalizeBeforeAnalysis(value: unknown): BeforeAnalysisResult {
       record.uncertainty,
       '参数为视觉推测，需根据现场光线调整。',
     ),
+  }
+}
+
+function normalizeVisualDimensions(value: unknown): BeforeVisualDimensions {
+  const record =
+    value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+  return {
+    colorTendency: normalizeText(record.colorTendency, '—'),
+    lightDirection: normalizeText(record.lightDirection, '—'),
+    contrast: normalizeText(record.contrast, '—'),
+    tone: normalizeText(record.tone, '—'),
+    temperature: normalizeText(record.temperature, '—'),
+    saturation: normalizeText(record.saturation, '—'),
   }
 }
 

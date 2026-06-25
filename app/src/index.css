@@ -320,6 +320,39 @@ button:disabled {
   color: var(--muted);
 }
 
+/* V3.0 拍前：结构化视觉分析 6 维 */
+.visual-dimensions {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+.vd-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 9px;
+}
+.vd-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 14px;
+}
+.vd-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.vd-k {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-dark);
+}
+.vd-v {
+  font-size: 12.5px;
+  color: #4a4f5a;
+}
+
 main {
   max-width: 1500px;
   margin: 0 auto;

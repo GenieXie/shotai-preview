@@ -1940,6 +1940,35 @@ function BeforeAnalysisPanel({
               <span style={{ width: `${result.confidence * 100}%` }} />
             </div>
           </div>
+          <div className="visual-dimensions">
+            <h3 className="vd-title">结构化视觉分析</h3>
+            <div className="vd-grid">
+              <div className="vd-item">
+                <span className="vd-k">色彩倾向</span>
+                <span className="vd-v">{result.visualDimensions.colorTendency}</span>
+              </div>
+              <div className="vd-item">
+                <span className="vd-k">光线方向</span>
+                <span className="vd-v">{result.visualDimensions.lightDirection}</span>
+              </div>
+              <div className="vd-item">
+                <span className="vd-k">对比度</span>
+                <span className="vd-v">{result.visualDimensions.contrast}</span>
+              </div>
+              <div className="vd-item">
+                <span className="vd-k">影调</span>
+                <span className="vd-v">{result.visualDimensions.tone}</span>
+              </div>
+              <div className="vd-item">
+                <span className="vd-k">色温</span>
+                <span className="vd-v">{result.visualDimensions.temperature}</span>
+              </div>
+              <div className="vd-item">
+                <span className="vd-k">饱和度</span>
+                <span className="vd-v">{result.visualDimensions.saturation}</span>
+              </div>
+            </div>
+          </div>
           <ResultSection title="场景与环境" content={result.scene} />
           <ResultSection title="光线与曝光" content={result.lighting} />
           <ResultSection title="构图方向" content={result.composition} />
