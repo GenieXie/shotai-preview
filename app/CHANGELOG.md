@@ -1,5 +1,28 @@
 # Changelog
 
+## 3.0.0 - 2026-06-25
+
+Shotai V3.0 (first wave: model switching + AI tuning):
+
+- Adds a page-level AI model selector in the top bar. Users can switch between
+  `gemini-3.1-pro-preview`, `gemini-3.5-flash`, `gemini-3.1-flash-lite`
+  (default), and `gemini-2.5-flash`; the choice is persisted to localStorage and
+  sent per request. The backend validates the requested model against an
+  allowlist and falls back to the default otherwise. Previously the model could
+  only be changed via the `GEMINI_MODEL` env var on the server.
+- Raises Gemini `temperature` from 0.2 (color) / 0.3 (before-shoot) to 0.8.
+- Lets AI apply strength go from 0–100% up to 0–200% (adds 125% / 150% presets
+  and extends the slider), so users can push AI/preset effects beyond 100%.
+- Loosens the AI adjustment safety scaling (was halve-then-cap, which made AI
+  edits feel too weak): scale 0.5 → 0.85 and caps raised ~1.8×. Values are
+  tunable knobs in `imageAdjustments.ts`.
+- Renames the scope control label "同步范围" to "当前作用范围".
+
+> Not yet in this wave: the natural-language "AI 精修" module and the pre-shoot
+> workbench overhaul (multi-reference queue, structured visual analysis, EXIF
+> extraction, send-to-post-shoot). Prototyped in `v3-prototype/`, to be built
+> next.
+
 ## 2.3.1 - 2026-06-21
 
 Shotai V2.3.1 speeds up AI analysis and closes the V2.3 PRD gaps:

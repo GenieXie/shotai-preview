@@ -83,6 +83,16 @@ import { getAdjustmentWorkerSnapshot } from './lib/adjustmentWorkerClient'
 import { createImageAsset, type ImageAsset } from './lib/imageAsset'
 import { createZipBlob } from './lib/zipExport'
 
+// V3.0：可在页面切换的 Gemini 模型（与后端白名单一致）
+const MODEL_OPTIONS = [
+  'gemini-3.1-pro-preview',
+  'gemini-3.5-flash',
+  'gemini-3.1-flash-lite',
+  'gemini-2.5-flash',
+] as const
+const DEFAULT_MODEL = 'gemini-3.1-flash-lite'
+const MODEL_STORAGE_KEY = 'shotai.model'
+
 type ActiveTab = 'before' | 'after'
 type AnalysisStatus = 'idle' | 'loading' | 'success' | 'error'
 type ApiHealth = 'checking' | 'ready' | 'degraded' | 'offline'
@@ -213,6 +223,13 @@ function App() {
   const [aiAnalysis, setAiAnalysis] = useState<ColorAnalysisResult | null>(null)
   const [aiSnapshot, setAiSnapshot] = useState<AdjustmentValues | null>(null)
   const [aiApplyStrength, setAiApplyStrength] = useState(100)
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    if (typeof window === 'undefined') return DEFAULT_MODEL
+    const saved = window.localStorage.getItem(MODEL_STORAGE_KEY)
+    return saved && (MODEL_OPTIONS as readonly string[]).includes(saved)
+      ? saved
+      : DEFAULT_MODEL
+  })
   const [beforeStatus, setBeforeStatus] = useState<AnalysisStatus>('idle')
   const [beforeError, setBeforeError] = useState('')
   const [beforeResult, setBeforeResult] = useState<BeforeAnalysisResult | null>(
@@ -983,6 +1000,7 @@ function App() {
       const result = await analyzeColorMatch(targetImage, userImage, {
         signal: controller.signal,
         onPhaseChange: setAnalysisPhase,
+        model: selectedModel,
       })
       if (colorAnalysisRequestRef.current !== requestId) return
       colorAnalysisCacheRef.current.set(cacheKey, result)
@@ -1067,7 +1085,7 @@ function App() {
     beforeAnalysisControllerRef.current = controller
 
     try {
-      const result = await analyzeBeforeShoot(beforeImage, controller.signal)
+      const result = await analyzeBeforeShoot(beforeImage, selectedModel, controller.signal)
       setBeforeResult(result)
       setBeforeStatus('success')
     } catch (error) {
@@ -1098,7 +1116,7 @@ function App() {
             <Aperture size={19} strokeWidth={2.2} />
           </span>
           <span>Shotai</span>
-          <span className="version-tag">V2.3</span>
+          <span className="version-tag">V3.0</span>
         </div>
         <nav className="global-nav" aria-label="全局导航">
           <button type="button" className={activeTab === 'before' ? 'active' : ''} onClick={() => setActiveTab('before')}>
@@ -1122,10 +1140,34 @@ function App() {
             历史记录
           </button>
         </nav>
+        <div className="topbar-right">
+        <label className="model-select" title="选择 AI 模型（用于评测与按需切换）">
+          <span className="model-select__label">模型</span>
+          <select
+            aria-label="选择 AI 模型"
+            value={selectedModel}
+            onChange={(event) => {
+              const next = event.target.value
+              setSelectedModel(next)
+              try {
+                window.localStorage.setItem(MODEL_STORAGE_KEY, next)
+              } catch {
+                /* localStorage 不可用时忽略，仅本次会话生效 */
+              }
+            }}
+          >
+            {MODEL_OPTIONS.map((model) => (
+              <option key={model} value={model}>
+                {model}
+              </option>
+            ))}
+          </select>
+        </label>
         <span className={`api-health ${apiHealth}`}>
           {apiHealth === 'ready' ? <Server size={13} /> : <ServerOff size={13} />}
           {formatApiHealth(apiHealth)}
         </span>
+        </div>
       </header>
 
       <main>
@@ -1291,7 +1333,7 @@ function App() {
               <section className="scope-panel">
                 <div className="panel-heading compact">
                   <div>
-                    <span className="panel-kicker">同步范围</span>
+                    <span className="panel-kicker">当前作用范围</span>
                     <h2>参数应用到哪里</h2>
                   </div>
                 </div>
@@ -1521,7 +1563,7 @@ function AiSuggestionCard({
       <article className="ai-strength-card">
         <h3>应用强度</h3>
         <div className="ai-strength-actions" aria-label="AI 应用强度">
-          {[25, 50, 100].map((value) => (
+          {[25, 50, 100, 125, 150].map((value) => (
             <button
               key={value}
               type="button"
@@ -1536,7 +1578,7 @@ function AiSuggestionCard({
           <input
             type="range"
             min="0"
-            max="100"
+            max="200"
             step="5"
             value={strength}
             onChange={(event) => onStrengthChange(Number(event.target.value))}

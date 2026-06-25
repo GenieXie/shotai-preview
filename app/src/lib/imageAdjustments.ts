@@ -125,22 +125,33 @@ export function normalizeAdjustmentValues(value: unknown): AdjustmentValues {
   return result
 }
 
+// V3.0：放宽 AI 调色的"安全缩放"。此前把每条建议先 ×0.5 再各自封顶，导致 AI 改动幅度过小。
+// 现在保留温和到 0.85，并把各项上限抬高约 1.8 倍；高光防溢出的二次保护从 ×0.5 放宽到 ×0.7。
+// 这几个数是可调旋钮，需配合真实图片观感微调。
+const AI_SAFETY_SCALE = 0.85
+const AI_SAFETY_CAPS: Partial<Record<AdjustmentKey, number>> = {
+  exposure: 32,
+  brightness: 36,
+  highlights: 28,
+  whites: 24,
+  contrast: 45,
+  saturation: 45,
+  vibrance: 45,
+  clarity: 36,
+  dehaze: 36,
+  sharpness: 36,
+}
+
 export function normalizeAiAdjustmentsForSafety(value: unknown): AdjustmentValues {
   const scaled = mapAdjustments(normalizeAdjustmentValues(value), (amount) =>
-    Math.round(amount * 0.5),
+    Math.round(amount * AI_SAFETY_SCALE),
   )
   const capped = { ...scaled }
 
-  capped.exposure = Math.min(capped.exposure, 18)
-  capped.brightness = Math.min(capped.brightness, 20)
-  capped.highlights = Math.min(capped.highlights, 15)
-  capped.whites = Math.min(capped.whites, 12)
-  capped.contrast = Math.min(capped.contrast, 25)
-  capped.saturation = Math.min(capped.saturation, 25)
-  capped.vibrance = Math.min(capped.vibrance, 25)
-  capped.clarity = Math.min(capped.clarity, 20)
-  capped.dehaze = Math.min(capped.dehaze, 20)
-  capped.sharpness = Math.min(capped.sharpness, 20)
+  for (const key of Object.keys(AI_SAFETY_CAPS) as AdjustmentKey[]) {
+    const cap = AI_SAFETY_CAPS[key]
+    if (cap !== undefined) capped[key] = Math.min(capped[key], cap)
+  }
 
   const positiveHighlightDrivers = [
     capped.exposure,
@@ -150,8 +161,8 @@ export function normalizeAiAdjustmentsForSafety(value: unknown): AdjustmentValue
   ].filter((amount) => amount > 0).length
 
   if (positiveHighlightDrivers >= 2) {
-    capped.highlights = Math.min(capped.highlights, Math.round(capped.highlights * 0.5))
-    capped.whites = Math.min(capped.whites, Math.round(capped.whites * 0.5))
+    capped.highlights = Math.min(capped.highlights, Math.round(capped.highlights * 0.7))
+    capped.whites = Math.min(capped.whites, Math.round(capped.whites * 0.7))
   }
 
   return capped
@@ -173,7 +184,8 @@ export function blendAdjustments(
   target: AdjustmentValues,
   strength: number,
 ): AdjustmentValues {
-  const ratio = Math.max(0, Math.min(100, strength)) / 100
+  // V3.0：允许 0~200% 强度（>100% 可加强 AI/预设效果，最终值仍被 normalizeAdjustment 钳在 ±100）
+  const ratio = Math.max(0, Math.min(200, strength)) / 100
   return mapAdjustments(base, (value, key) =>
     value + (target[key] - value) * ratio,
   )

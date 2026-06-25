@@ -26,6 +26,8 @@ export type ColorAnalysisPhase =
 interface ColorAnalysisOptions {
   signal?: AbortSignal
   onPhaseChange?: (phase: ColorAnalysisPhase) => void
+  /** V3.0：用户选择的 Gemini 模型；缺省时后端回退到默认模型 */
+  model?: string
 }
 
 export async function analyzeColorMatch(
@@ -48,6 +50,7 @@ export async function analyzeColorMatch(
     {
       targetImage: targetPayload,
       userImage: userPayload,
+      model: options.model,
     },
     options.signal,
     () => options.onPhaseChange?.('analyzing'),
@@ -59,10 +62,15 @@ export async function analyzeColorMatch(
 
 export async function analyzeBeforeShoot(
   image: ImageAsset,
+  model?: string,
   signal?: AbortSignal,
 ): Promise<BeforeAnalysisResult> {
   const imagePayload = await encodeImageForAnalysis(image)
-  const payload = await requestAnalysis('/api/before-analysis', { image: imagePayload }, signal)
+  const payload = await requestAnalysis(
+    '/api/before-analysis',
+    { image: imagePayload, model },
+    signal,
+  )
 
   return normalizeBeforeAnalysis(payload)
 }

@@ -53,7 +53,7 @@ test('v2 adjustments normalize legacy six-parameter values', () => {
   assert.equal(adjustments.vignette, 0)
 })
 
-test('ai adjustments are scaled and capped conservatively', () => {
+test('ai adjustments are scaled and capped (V3.0 loosened safety)', () => {
   const adjustments = normalizeAiAdjustmentsForSafety({
     exposure: 80,
     brightness: 80,
@@ -68,17 +68,17 @@ test('ai adjustments are scaled and capped conservatively', () => {
     temperature: -31,
   })
 
-  assert.equal(adjustments.exposure, 18)
-  assert.equal(adjustments.brightness, 20)
-  assert.equal(adjustments.contrast, 25)
-  assert.equal(adjustments.highlights, 8)
-  assert.equal(adjustments.whites, 6)
-  assert.equal(adjustments.saturation, 25)
-  assert.equal(adjustments.vibrance, 25)
-  assert.equal(adjustments.clarity, 20)
-  assert.equal(adjustments.dehaze, 20)
-  assert.equal(adjustments.sharpness, 20)
-  assert.equal(adjustments.temperature, -15)
+  assert.equal(adjustments.exposure, 32)
+  assert.equal(adjustments.brightness, 36)
+  assert.equal(adjustments.contrast, 45)
+  assert.equal(adjustments.highlights, 20)
+  assert.equal(adjustments.whites, 17)
+  assert.equal(adjustments.saturation, 45)
+  assert.equal(adjustments.vibrance, 45)
+  assert.equal(adjustments.clarity, 36)
+  assert.equal(adjustments.dehaze, 36)
+  assert.equal(adjustments.sharpness, 36)
+  assert.equal(adjustments.temperature, -26)
 })
 
 test('ai highlight compression only affects stacked positive highlight drivers', () => {
@@ -89,9 +89,9 @@ test('ai highlight compression only affects stacked positive highlight drivers',
     whites: 20,
   })
 
-  assert.equal(adjustments.exposure, -10)
-  assert.equal(adjustments.highlights, 5)
-  assert.equal(adjustments.whites, 5)
+  assert.equal(adjustments.exposure, -17)
+  assert.equal(adjustments.highlights, 12)
+  assert.equal(adjustments.whites, 12)
 })
 
 test('image warnings identify panorama, low resolution, large file, and PNG', () => {

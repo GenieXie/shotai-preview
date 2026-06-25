@@ -7,6 +7,21 @@ import { fileURLToPath } from 'node:url'
 const PORT = Number(process.env.PORT || process.env.SHOTAI_API_PORT || 8787)
 const HOST = process.env.SHOTAI_API_HOST || '127.0.0.1'
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+// V3.0：用户可在页面切换模型。仅放行白名单内的模型，避免把任意字符串拼进 Gemini URL。
+const ALLOWED_MODELS = [
+  'gemini-3.1-pro-preview',
+  'gemini-3.5-flash',
+  'gemini-3.1-flash-lite',
+  'gemini-2.5-flash',
+]
+const DEFAULT_MODEL = ALLOWED_MODELS.includes(GEMINI_MODEL)
+  ? GEMINI_MODEL
+  : 'gemini-3.1-flash-lite'
+function resolveModel(requested) {
+  return typeof requested === 'string' && ALLOWED_MODELS.includes(requested)
+    ? requested
+    : DEFAULT_MODEL
+}
 const MAX_BODY_BYTES = 16 * 1024 * 1024
 const RETRY_DELAYS_MS = [1200]
 const GEMINI_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS || 12_000)
@@ -58,7 +73,8 @@ const server = createServer(async (request, response) => {
   if (request.url === '/health' && request.method === 'GET') {
     sendJson(response, 200, {
       status: 'ok',
-      model: GEMINI_MODEL,
+      model: DEFAULT_MODEL,
+      allowedModels: ALLOWED_MODELS,
       apiKeyConfigured: Boolean(process.env.GEMINI_API_KEY),
       outboundProxyConfigured: Boolean(
         process.env.HTTPS_PROXY || process.env.HTTP_PROXY,
@@ -158,6 +174,7 @@ async function handleColorAnalysis(body, signal) {
   return analyzeColor({
     targetImage: targetImage.payload,
     userImage: userImage.payload,
+    model: resolveModel(body.model),
   }, signal)
 }
 
@@ -171,7 +188,7 @@ async function handleBeforeAnalysis(body, signal) {
     throw requestError(`参考照片无效：${image.message}`)
   }
 
-  return analyzeBefore(image.payload, signal)
+  return analyzeBefore(image.payload, signal, resolveModel(body.model))
 }
 
 function validateImagePayload(value) {
@@ -196,7 +213,7 @@ function validateImagePayload(value) {
   }
 }
 
-async function analyzeColor({ targetImage, userImage }, signal) {
+async function analyzeColor({ targetImage, userImage, model }, signal) {
   const payload = await requestGemini({
     contents: [
       {
@@ -223,15 +240,15 @@ async function analyzeColor({ targetImage, userImage }, signal) {
     generationConfig: {
       responseMimeType: 'application/json',
       responseJsonSchema: colorAnalysisSchema(),
-      temperature: 0.2,
+      temperature: 0.8,
       maxOutputTokens: 1400,
     },
-  }, signal)
+  }, signal, model)
 
   return normalizeAnalysis(parseGeminiJson(payload))
 }
 
-async function analyzeBefore(image, signal) {
+async function analyzeBefore(image, signal, model) {
   const payload = await requestGemini({
     contents: [
       {
@@ -257,18 +274,18 @@ async function analyzeBefore(image, signal) {
     generationConfig: {
       responseMimeType: 'application/json',
       responseJsonSchema: beforeAnalysisSchema(),
-      temperature: 0.3,
+      temperature: 0.8,
       maxOutputTokens: 3000,
     },
-  }, signal)
+  }, signal, model)
 
   return normalizeBeforeAnalysis(parseGeminiJson(payload))
 }
 
-async function requestGemini(body, externalSignal) {
+async function requestGemini(body, externalSignal, model) {
   const endpoint =
     `https://generativelanguage.googleapis.com/v1beta/models/` +
-    `${encodeURIComponent(GEMINI_MODEL)}:generateContent`
+    `${encodeURIComponent(model || GEMINI_MODEL)}:generateContent`
 
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
     try {
