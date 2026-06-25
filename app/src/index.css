@@ -353,6 +353,119 @@ button:disabled {
   color: #4a4f5a;
 }
 
+/* V3.0 拍前工作台 */
+.before-left {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ref-queue-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.ref-queue-head small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.ref-queue {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.ref-thumb {
+  width: 96px;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  padding: 2px;
+  background: transparent;
+  cursor: pointer;
+}
+.ref-thumb img {
+  width: 100%;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  display: block;
+}
+.ref-thumb .ref-cap {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 3px;
+  text-align: center;
+}
+.ref-thumb.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.ref-thumb.selected .ref-cap {
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+.ref-add {
+  width: 140px;
+}
+.before-preview {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  padding: 0;
+  background: #0b1622;
+  cursor: pointer;
+  display: block;
+  width: 100%;
+}
+.before-preview img {
+  width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  display: block;
+}
+.before-preview.empty {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+  color: var(--muted);
+  background: var(--surface-muted);
+  cursor: default;
+  font-size: 13px;
+}
+.exif-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+}
+.exif-lead {
+  font-size: 12px;
+  color: var(--muted);
+}
+.exif-chip {
+  font-size: 12px;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 4px 9px;
+  color: #4a4f5a;
+}
+.before-link-after {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.before-link-after h3 {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 9px;
+}
+.before-link-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 main {
   max-width: 1500px;
   margin: 0 auto;

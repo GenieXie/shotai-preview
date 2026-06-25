@@ -83,6 +83,7 @@ import {
 } from './lib/imageExport'
 import { getAdjustmentWorkerSnapshot } from './lib/adjustmentWorkerClient'
 import { createImageAsset, type ImageAsset } from './lib/imageAsset'
+import { readExif, exifEntries, type ExifInfo } from './lib/exif'
 import { createZipBlob } from './lib/zipExport'
 
 // V3.0：可在页面切换的 Gemini 模型（与后端白名单一致）
@@ -194,6 +195,11 @@ function fileToDataUrl(file: File): Promise<string> {
 function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('after')
   const [beforeImage, setBeforeImage] = useState<ImageAsset | null>(null)
+  // V3.0 拍前：多参考图队列（分析仍以选中的单张为主）
+  const [beforeQueue, setBeforeQueue] = useState<
+    { id: string; asset: ImageAsset; exif: ExifInfo | null }[]
+  >([])
+  const [selectedBeforeId, setSelectedBeforeId] = useState<string | null>(null)
   const [targetImage, setTargetImage] = useState<ImageAsset | null>(null)
   const [batchImages, setBatchImages] = useState<BatchImageItem[]>([])
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null)
@@ -555,6 +561,48 @@ function App() {
     setBeforeStatus('idle')
     setBeforeCopied(false)
   }
+
+  // V3.0 拍前：多参考图队列
+  const addBeforeRef = async (asset: ImageAsset) => {
+    const id = crypto.randomUUID()
+    setBeforeQueue((current) => [...current, { id, asset, exif: null }])
+    setSelectedBeforeId(id)
+    setBeforeImage(asset)
+    clearBeforeAnalysis()
+    const exif = await readExif(asset)
+    setBeforeQueue((current) =>
+      current.map((item) => (item.id === id ? { ...item, exif } : item)),
+    )
+  }
+
+  const selectBeforeRef = (id: string) => {
+    const item = beforeQueue.find((entry) => entry.id === id)
+    if (!item) return
+    setSelectedBeforeId(id)
+    setBeforeImage(item.asset)
+    clearBeforeAnalysis()
+  }
+
+  // 闭环：拍前分析 → 拍后
+  const sendBeforeToAfter = () => {
+    if (!beforeResult) return
+    setGlobalAdjustments(beforeAnalysisToAdjustments(beforeResult))
+    setGlobalAdjustmentSource('ai')
+    setActiveTab('after')
+    setPresetMessage('已把拍前分析作为拍后起始调色参数。')
+  }
+
+  const saveBeforeAsPreset = () => {
+    if (!beforeResult) return
+    const preset = createCustomPreset('拍前建议', beforeAnalysisToAdjustments(beforeResult))
+    setCustomPresets((current) => [preset, ...current])
+    setPresetMessage('已把拍前分析保存为拍后预设“拍前建议”。')
+  }
+
+  const selectedBeforeItem =
+    beforeQueue.find((item) => item.id === selectedBeforeId) ?? null
+  const beforeExif = selectedBeforeItem?.exif ?? null
+  const selectedBeforeAsset = selectedBeforeItem?.asset ?? beforeImage
 
   const remember = (label: string, value = currentAdjustments) => {
     setHistoryPast((current) => [...current.slice(-49), { values: value, label }])
@@ -1307,16 +1355,66 @@ function App() {
             </div>
 
             <div className="before-grid">
-              <ImageUploader
-                label="参考照片"
-                description="上传你想参考的构图或光线风格"
-                image={beforeImage}
-                onPreview={(image) => setLightbox({ image, title: '参考照片' })}
-                onImageChange={(next) => {
-                  replaceImage(beforeImage, setBeforeImage)(next)
-                  clearBeforeAnalysis()
-                }}
-              />
+              <div className="before-left">
+                <div className="ref-queue-head">
+                  <span className="panel-kicker">参考图队列</span>
+                  <small>可上传多张 · 分析以选中的单张为主</small>
+                </div>
+                <div className="ref-queue">
+                  {beforeQueue.map((item, index) => (
+                    <button
+                      type="button"
+                      key={item.id}
+                      className={`ref-thumb${item.id === selectedBeforeId ? ' selected' : ''}`}
+                      onClick={() => selectBeforeRef(item.id)}
+                      title={`选择参考 ${index + 1}`}
+                    >
+                      <img src={item.asset.url} alt={`参考 ${index + 1}`} />
+                      <span className="ref-cap">
+                        参考 {index + 1}
+                        {item.id === selectedBeforeId ? ' · 当前分析图' : ''}
+                      </span>
+                    </button>
+                  ))}
+                  <div className="ref-add">
+                    <ImageUploader
+                      compact
+                      label="上传参考照片"
+                      description="可添加多张参考图"
+                      image={null}
+                      onPreview={(image) => setLightbox({ image, title: '参考照片' })}
+                      onImageChange={(next) => {
+                        if (next) void addBeforeRef(next)
+                      }}
+                    />
+                  </div>
+                </div>
+                {selectedBeforeAsset ? (
+                  <button
+                    type="button"
+                    className="before-preview"
+                    onClick={() =>
+                      setLightbox({ image: selectedBeforeAsset, title: '参考照片' })
+                    }
+                  >
+                    <img src={selectedBeforeAsset.url} alt="选中的参考图" />
+                  </button>
+                ) : (
+                  <div className="before-preview empty">
+                    上传参考照片后在此预览
+                  </div>
+                )}
+                {beforeExif && (
+                  <div className="exif-strip">
+                    <span className="exif-lead">📷 自带属性</span>
+                    {exifEntries(beforeExif).map((entry) => (
+                      <span className="exif-chip" key={entry}>
+                        {entry}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
               <BeforeAnalysisPanel
                 imageReady={!!beforeImage}
                 privacyAccepted={beforePrivacyAccepted}
@@ -1328,6 +1426,8 @@ function App() {
                 onAnalyze={runBeforeAnalysis}
                 onCancel={cancelBeforeAnalysis}
                 onCopy={copyBeforeAnalysis}
+                onSaveToPreset={saveBeforeAsPreset}
+                onSendToAfter={sendBeforeToAfter}
               />
             </div>
           </section>
@@ -1864,6 +1964,8 @@ function BeforeAnalysisPanel({
   onAnalyze,
   onCancel,
   onCopy,
+  onSaveToPreset,
+  onSendToAfter,
 }: {
   imageReady: boolean
   privacyAccepted: boolean
@@ -1875,6 +1977,8 @@ function BeforeAnalysisPanel({
   onAnalyze: () => void
   onCancel: () => void
   onCopy: () => void
+  onSaveToPreset?: () => void
+  onSendToAfter?: () => void
 }) {
   return (
     <section className="analysis-panel before-analysis-panel">
@@ -1975,6 +2079,23 @@ function BeforeAnalysisPanel({
           <ResultList title="参数起点" items={result.cameraSettings} />
           <ResultList title="现场执行建议" items={result.executionTips} />
           <ResultSection title="不确定性提示" content={result.uncertainty} warning />
+          {(onSaveToPreset || onSendToAfter) && (
+            <div className="before-link-after">
+              <h3>衔接拍后调色</h3>
+              <div className="before-link-buttons">
+                {onSaveToPreset && (
+                  <button type="button" className="secondary-button" onClick={onSaveToPreset}>
+                    保存为拍后预设
+                  </button>
+                )}
+                {onSendToAfter && (
+                  <button type="button" className="analysis-button" onClick={onSendToAfter}>
+                    发送到拍后调色
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="analysis-empty before-empty">
@@ -2164,6 +2285,35 @@ function analysisRecoveryHint(code: AnalysisErrorCode | null) {
   if (code === 'quota') return '请降低请求频率，或检查 Gemini API 额度。'
   if (code === 'cancelled') return '分析已取消，当前图片和参数已保留。'
   return '当前图片和参数已保留，可重新分析。'
+}
+
+// V3.0 拍前→拍后闭环：把拍前分析的视觉方向映射成一组拍后起始调色参数（启发式，作为起点）
+function beforeAnalysisToAdjustments(result: BeforeAnalysisResult): AdjustmentValues {
+  const vd = result.visualDimensions
+  const text = [
+    vd.colorTendency,
+    vd.temperature,
+    vd.contrast,
+    vd.tone,
+    vd.saturation,
+    result.lighting,
+  ].join(' ')
+  const has = (...kw: string[]) => kw.some((k) => text.includes(k))
+  const adj: AdjustmentValues = { ...DEFAULT_ADJUSTMENTS }
+  if (has('冷')) adj.temperature = -15
+  else if (has('暖')) adj.temperature = 15
+  if (has('高对比', '高反差', '强对比', '硬光')) adj.contrast = 18
+  else if (has('低对比', '低反差', '柔和', '平淡')) adj.contrast = -10
+  if (has('低饱和', '淡', '去饱和')) adj.saturation = -14
+  else if (has('高饱和', '浓郁', '鲜艳', '艳丽')) adj.saturation = 14
+  if (has('通透', '明亮', '高调', '空气感')) {
+    adj.exposure = 6
+    adj.vibrance = 8
+  } else if (has('暗调', '低调', '深沉', '压暗')) {
+    adj.exposure = -8
+    adj.contrast = Math.max(adj.contrast, 8)
+  }
+  return adj
 }
 
 function describeAdjustmentSource(source: AdjustmentSource | null): string {
