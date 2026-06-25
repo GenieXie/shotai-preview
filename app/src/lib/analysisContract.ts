@@ -107,6 +107,25 @@ export function normalizeBeforeAnalysis(value: unknown): BeforeAnalysisResult {
   }
 }
 
+export interface RefineResult {
+  /** 相对当前参数的增量（未涉及的项为 0） */
+  changes: AdjustmentValues
+  rationale: string
+  note: string
+}
+
+export function normalizeColorRefine(value: unknown): RefineResult {
+  if (!value || typeof value !== 'object') {
+    throw new Error('AI 返回的精修结果格式错误。')
+  }
+  const record = value as Record<string, unknown>
+  return {
+    changes: normalizeAdjustmentValues(record.changes),
+    rationale: normalizeText(record.rationale, ''),
+    note: normalizeText(record.note, ''),
+  }
+}
+
 function normalizeParameterRationales(
   value: unknown,
   adjustments: AdjustmentValues,

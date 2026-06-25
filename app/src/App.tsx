@@ -39,6 +39,7 @@ import { PresetPanel } from './components/PresetPanel'
 import {
   ADJUSTMENT_LABELS,
   blendAdjustments,
+  mapAdjustments,
   DEFAULT_ADJUSTMENTS,
   formatAdjustmentValue,
   normalizeAdjustmentValues,
@@ -53,6 +54,7 @@ import {
   AnalysisApiError,
   analyzeBeforeShoot,
   analyzeColorMatch,
+  refineColorAdjustments,
   getApiHealth,
   type AnalysisErrorCode,
   type ColorAnalysisPhase,
@@ -60,6 +62,7 @@ import {
 import type {
   BeforeAnalysisResult,
   ColorAnalysisResult,
+  RefineResult,
 } from './lib/analysisContract'
 import {
   applyPresetStrength,
@@ -230,6 +233,15 @@ function App() {
       ? saved
       : DEFAULT_MODEL
   })
+  // V3.0 AI 精修
+  const [refineInstruction, setRefineInstruction] = useState('')
+  const [refineStatus, setRefineStatus] = useState<AnalysisStatus>('idle')
+  const [refineError, setRefineError] = useState('')
+  const [refineSuggestion, setRefineSuggestion] = useState<RefineResult | null>(null)
+  const [refinePreviewBaseline, setRefinePreviewBaseline] =
+    useState<AdjustmentValues | null>(null)
+  const refineSentImageRef = useRef<ImageAsset | null>(null)
+  const refineControllerRef = useRef<AbortController | null>(null)
   const [beforeStatus, setBeforeStatus] = useState<AnalysisStatus>('idle')
   const [beforeError, setBeforeError] = useState('')
   const [beforeResult, setBeforeResult] = useState<BeforeAnalysisResult | null>(
@@ -1065,6 +1077,82 @@ function App() {
     setPresetMessage('已恢复 AI 分析前的参数。')
   }
 
+  // V3.0 AI 精修：自然语言微调当前参数（单轮 + 增量）
+  const addRefineDelta = (base: AdjustmentValues, changes: AdjustmentValues) =>
+    mapAdjustments(base, (value, key) => value + changes[key])
+
+  const generateRefine = async () => {
+    if (!userImage) return
+    const instruction = refineInstruction.trim()
+    if (!instruction) return
+    if (refinePreviewBaseline) {
+      applyAdjustmentsToScope(refinePreviewBaseline, { recordHistory: false })
+      setRefinePreviewBaseline(null)
+    }
+    setRefineStatus('loading')
+    setRefineError('')
+    const controller = new AbortController()
+    refineControllerRef.current = controller
+    // 首次传图，后续轮复用（同一张实拍图不再重复上传）
+    const sendImage = refineSentImageRef.current !== userImage
+    try {
+      const result = await refineColorAdjustments(
+        instruction,
+        currentAdjustments,
+        sendImage ? userImage : null,
+        { model: selectedModel, signal: controller.signal },
+      )
+      if (sendImage) refineSentImageRef.current = userImage
+      setRefineSuggestion(result)
+      setRefineStatus('success')
+    } catch (error) {
+      setRefineStatus('error')
+      setRefineError(normalizeAnalysisError(error).message)
+    } finally {
+      refineControllerRef.current = null
+    }
+  }
+
+  const togglePreviewRefine = () => {
+    if (!refineSuggestion) return
+    if (refinePreviewBaseline) {
+      applyAdjustmentsToScope(refinePreviewBaseline, { recordHistory: false })
+      setRefinePreviewBaseline(null)
+    } else {
+      const baseline = currentAdjustments
+      setRefinePreviewBaseline(baseline)
+      applyAdjustmentsToScope(addRefineDelta(baseline, refineSuggestion.changes), {
+        recordHistory: false,
+        source: 'ai',
+      })
+    }
+  }
+
+  const applyRefine = () => {
+    if (!refineSuggestion) return
+    if (refinePreviewBaseline) {
+      // 预览时实时值已是 baseline+delta；把 baseline 记入历史，撤回即可回到 baseline
+      remember(refinePreviewBaseline)
+      setRefinePreviewBaseline(null)
+    } else {
+      applyAdjustmentsToScope(
+        addRefineDelta(currentAdjustments, refineSuggestion.changes),
+        { source: 'ai' },
+      )
+    }
+    setActivePresetId(null)
+    setPresetModified(false)
+    setPresetMessage('已应用 AI 精修建议。')
+    setRefineSuggestion(null)
+    setRefineInstruction('')
+  }
+
+  const undoRefine = () => {
+    setRefinePreviewBaseline(null)
+    setRefineSuggestion(null)
+    undoAdjustments()
+  }
+
   const runBeforeAnalysis = async () => {
     if (!beforeImage) {
       setBeforeStatus('error')
@@ -1454,6 +1542,81 @@ function App() {
                         ? '点击开始分析，AI 建议生成前不会显示伪参数。'
                         : '上传目标风格照并选择实拍照后开始分析。'}
                     </p>
+                  </div>
+                )}
+              </section>
+
+              <section className="ai-refine-card">
+                <div className="panel-heading">
+                  <div>
+                    <span className="panel-kicker">AI 精修</span>
+                    <h2>自然语言调色</h2>
+                  </div>
+                </div>
+                <div className="ai-refine-input">
+                  <input
+                    type="text"
+                    value={refineInstruction}
+                    onChange={(event) => setRefineInstruction(event.target.value)}
+                    placeholder="再冷一点，但保留肤色"
+                    disabled={!userImage || refineStatus === 'loading'}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') void generateRefine()
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="primary-inline"
+                    onClick={() => void generateRefine()}
+                    disabled={
+                      !userImage || !refineInstruction.trim() || refineStatus === 'loading'
+                    }
+                  >
+                    {refineStatus === 'loading' ? '生成中…' : '生成建议'}
+                  </button>
+                </div>
+                {!userImage && (
+                  <p className="ai-refine-hint">先选择一张实拍照，再用 AI 精修。</p>
+                )}
+                {refineStatus === 'error' && refineError && (
+                  <p className="ai-refine-error">{refineError}</p>
+                )}
+                {refineSuggestion && (
+                  <div className="ai-refine-result">
+                    {refineSuggestion.rationale && (
+                      <p className="ai-refine-rationale">{refineSuggestion.rationale}</p>
+                    )}
+                    <div className="ai-refine-changes">
+                      {Object.entries(refineSuggestion.changes)
+                        .filter(([, value]) => value !== 0)
+                        .map(([key, value]) => (
+                          <span key={key} className="ai-refine-chip">
+                            {ADJUSTMENT_LABELS[key as AdjustmentKey]}{' '}
+                            {formatAdjustmentValue(value)}
+                          </span>
+                        ))}
+                      {Object.values(refineSuggestion.changes).every(
+                        (value) => value === 0,
+                      ) && <span className="ai-refine-chip muted">无明显变化</span>}
+                    </div>
+                    {refineSuggestion.note && (
+                      <p className="ai-refine-note">{refineSuggestion.note}</p>
+                    )}
+                    <div className="ai-result-actions">
+                      <button type="button" onClick={togglePreviewRefine}>
+                        {refinePreviewBaseline ? '收起预览' : '预览建议'}
+                      </button>
+                      <button type="button" className="primary-inline" onClick={applyRefine}>
+                        应用
+                      </button>
+                      <button
+                        type="button"
+                        onClick={undoRefine}
+                        disabled={!historyPast.length}
+                      >
+                        撤回上一轮
+                      </button>
+                    </div>
                   </div>
                 )}
               </section>

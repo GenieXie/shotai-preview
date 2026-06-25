@@ -2,11 +2,14 @@ import type { ImageAsset } from './imageAsset'
 import {
   normalizeBeforeAnalysis,
   normalizeColorAnalysis,
+  normalizeColorRefine,
 } from './analysisContract'
 import type {
   BeforeAnalysisResult,
   ColorAnalysisResult,
+  RefineResult,
 } from './analysisContract'
+import type { AdjustmentValues } from './imageAdjustments'
 import {
   AnalysisApiError,
   classifyAnalysisResponseError,
@@ -73,6 +76,21 @@ export async function analyzeBeforeShoot(
   )
 
   return normalizeBeforeAnalysis(payload)
+}
+
+export async function refineColorAdjustments(
+  instruction: string,
+  currentAdjustments: AdjustmentValues,
+  image: ImageAsset | null,
+  options: { model?: string; signal?: AbortSignal } = {},
+): Promise<RefineResult> {
+  const imagePayload = image ? await encodeImageForAnalysis(image) : undefined
+  const payload = await requestAnalysis(
+    '/api/color-refine',
+    { instruction, currentAdjustments, image: imagePayload, model: options.model },
+    options.signal,
+  )
+  return normalizeColorRefine(payload)
 }
 
 export async function getApiHealth() {
