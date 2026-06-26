@@ -224,7 +224,13 @@ button:disabled {
 
 /* V3.0 AI 精修面板 */
 .ai-refine-card {
-  margin-top: 16px;
+  /* V3.1 #5：做成和右栏其它面板一致的卡片（补 margin/padding/border/bg），
+     修复贴边铺满导致的「排版溢出 + 与其它面板不对齐」。 */
+  margin: 12px;
+  padding: 12px;
+  border: 1px solid #e4e8e5;
+  border-radius: 9px;
+  background: #fbfcfb;
 }
 .ai-refine-input {
   display: flex;
@@ -527,8 +533,8 @@ main {
 }
 
 .v2-workbench {
-  height: calc(100vh - 84px);
-  min-height: 760px;
+  /* V3.1 #4：min-height 取代固定 height，内容超过一屏时整页可自然滚动（原来只有右栏能滚） */
+  min-height: max(760px, calc(100vh - 84px));
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(330px, 370px);
   gap: 14px;
@@ -537,9 +543,9 @@ main {
 
 .workbench-main {
   min-width: 0;
-  height: 100%;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  /* V3.1 #4：去掉 height:100%、预览行改 auto，左列随内容增高、参与整页滚动 */
+  grid-template-rows: auto auto;
   gap: 12px;
 }
 
@@ -551,7 +557,7 @@ main {
 
 .reference-strip {
   display: grid;
-  grid-template-columns: minmax(260px, 0.75fr) minmax(260px, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -560,12 +566,11 @@ main {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface);
-  overflow: hidden;
 }
 
+/* V3.1 #4：右栏不再独占滚动（去掉 height:100%+overflow-y），随整页一起滚动 */
 .v2-controls {
-  height: 100%;
-  overflow-y: auto;
+  min-width: 0;
 }
 
 .upload-panel,
@@ -584,7 +589,7 @@ main {
 }
 
 .upload-panel.compact {
-  min-height: 176px;
+  min-height: 211px;
 }
 
 .upload-copy,
@@ -622,7 +627,7 @@ main {
 .upload-trigger,
 .uploaded-image {
   width: 100%;
-  min-height: 118px;
+  min-height: 142px;
   margin-top: 10px;
   border: 1px dashed #bfc7c3;
   border-radius: 8px;
@@ -691,7 +696,7 @@ main {
 
 .uploaded-image img {
   width: 100%;
-  height: 118px;
+  height: 142px;
   display: block;
 }
 
@@ -726,13 +731,13 @@ main {
 
 .current-card {
   padding: 12px;
-  min-height: 176px;
+  min-height: 211px;
 }
 
 .current-preview {
   position: relative;
   width: 100%;
-  height: 128px;
+  height: 154px;
   margin-top: 10px;
   padding: 0;
   border: 1px solid var(--line);
@@ -748,7 +753,7 @@ main {
 }
 
 .current-empty {
-  height: 128px;
+  height: 154px;
   margin-top: 10px;
   border: 1px dashed #cbd1ce;
   border-radius: 8px;
@@ -870,7 +875,8 @@ main {
 
 .canvas-stage {
   position: relative;
-  min-height: 0;
+  /* V3.1 #4/#6：给预览真实高度并纵向拉长（原来 min-height:0 靠父级撑） */
+  min-height: 60vh;
   padding: 14px;
   background: #242827;
   overflow: hidden;

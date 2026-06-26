@@ -244,7 +244,10 @@ async function analyzeColor({ targetImage, userImage, model }, signal) {
       responseMimeType: 'application/json',
       responseJsonSchema: colorAnalysisSchema(),
       temperature: 0.8,
-      maxOutputTokens: 1400,
+      // 会「思考」的模型(2.5/3.x)其思考 token 也计入 maxOutputTokens；1400 容不下
+      // 「思考 + 含 16 项 adjustments 的 JSON」，会被 MAX_TOKENS 截断（lite 几乎不思考所以够用）。
+      // 注意：maxOutputTokens 只是上限，按实际产出计费，调高不会增加成功调用的成本。
+      maxOutputTokens: 8192,
     },
   }, signal, model, meta)
 
@@ -280,7 +283,8 @@ async function analyzeBefore(image, signal, model) {
       responseMimeType: 'application/json',
       responseJsonSchema: beforeAnalysisSchema(),
       temperature: 0.8,
-      maxOutputTokens: 3000,
+      // 同 analyzeColor：给思考模型留足额度，避免被 MAX_TOKENS 截断成「不完整 JSON」。
+      maxOutputTokens: 8192,
     },
   }, signal, model, meta)
 
@@ -457,32 +461,48 @@ function textSchema(description) {
 
 function parseGeminiJson(payload) {
   const text = extractGeminiText(payload)?.trim()
+
+  if (text) {
+    try {
+      return JSON.parse(text)
+    } catch {
+      const jsonMatch = text.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        try {
+          return JSON.parse(jsonMatch[0])
+        } catch {
+          // Continue to the clearer error below.
+        }
+      }
+    }
+  }
+
+  // 走到这里 = 没文本，或文本不是可解析的 JSON。
+  const finishReason = payload?.candidates?.[0]?.finishReason
+  console.error(
+    JSON.stringify({
+      error: 'GEMINI_INVALID_JSON',
+      finishReason,
+      rawTextPreview: (text || '').slice(0, 500),
+    }),
+  )
+
+  // 最常见的真因：思考模型把 maxOutputTokens 花在思考上，JSON 在中途被截断。
+  // 给它一个明确错误（而不是含糊的「不完整 JSON」），方便诊断也方便上层处理。
+  if (finishReason === 'MAX_TOKENS') {
+    const error = new Error(
+      'AI 输出超出长度上限被截断（常见于会「思考」的大模型，思考占用了输出额度）。请重试，或换用更轻量的模型。',
+    )
+    error.status = 502
+    error.code = 'GEMINI_TRUNCATED'
+    throw error
+  }
+
   if (!text) {
     throw new Error('Gemini API 未返回结构化文本结果。')
   }
 
-  try {
-    return JSON.parse(text)
-  } catch {
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      try {
-        return JSON.parse(jsonMatch[0])
-      } catch {
-        // Continue to the clearer error below.
-      }
-    }
-
-    console.error(
-      JSON.stringify({
-        error: 'GEMINI_INVALID_JSON',
-        finishReason: payload?.candidates?.[0]?.finishReason,
-        rawTextPreview: text.slice(0, 500),
-      }),
-    )
-
-    throw new Error('Gemini 返回了不完整的 JSON。请重新点击分析；如果连续失败，请换用更小的图片或稍后重试。')
-  }
+  throw new Error('Gemini 返回了不完整的 JSON。请重新点击分析；如果连续失败，请换用更小的图片或稍后重试。')
 }
 
 function normalizeBeforeAnalysis(value) {
@@ -831,7 +851,8 @@ async function refineColor({ instruction, currentAdjustments, image, model, hist
         responseMimeType: 'application/json',
         responseJsonSchema: colorRefineSchema(),
         temperature: 0.4,
-        maxOutputTokens: 600,
+        // 精修 JSON 很小，但思考模型的思考 token 也吃这个额度，600 太紧会截断；留足思考空间。
+        maxOutputTokens: 4096,
       },
     },
     signal,

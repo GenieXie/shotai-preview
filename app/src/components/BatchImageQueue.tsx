@@ -17,7 +17,7 @@ import type {
 import { createImageAsset, type ImageAsset } from '../lib/imageAsset'
 import type { ExportQuality } from '../lib/imageExport'
 
-export const MAX_BATCH_IMAGES = 20
+export const MAX_BATCH_IMAGES = 5
 export const MAX_BATCH_TOTAL_SIZE = 200 * 1024 * 1024
 
 export type BatchExportStatus =
@@ -112,7 +112,7 @@ export function BatchImageQueue({
 
     const remaining = MAX_BATCH_IMAGES - items.length
     if (remaining <= 0) {
-      setMessage('批量队列已达到 20 张上限。')
+      setMessage('批量队列已达到 5 张上限。')
       return
     }
 
@@ -350,7 +350,7 @@ export function BatchImageQueue({
         >
           <ImagePlus size={22} />
           <strong>选择多张实拍照</strong>
-          <span>最多 20 张，可按当前、选中或全部图片同步参数</span>
+          <span>最多 5 张，可按当前、选中或全部图片同步参数</span>
         </button>
       )}
       {message && <p className="batch-message">{message}</p>}

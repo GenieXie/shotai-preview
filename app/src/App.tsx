@@ -64,6 +64,10 @@ import type {
   RefineResult,
 } from './lib/analysisContract'
 import {
+  normalizeBeforeAnalysis,
+  normalizeColorAnalysis,
+} from './lib/analysisContract'
+import {
   applyPresetStrength,
   BUILT_IN_PRESETS,
   createCustomPreset,
@@ -256,9 +260,6 @@ function App() {
   const [refineInstruction, setRefineInstruction] = useState('')
   const [refineStatus, setRefineStatus] = useState<AnalysisStatus>('idle')
   const [refineError, setRefineError] = useState('')
-  const [refineSuggestion, setRefineSuggestion] = useState<RefineResult | null>(null)
-  const [refinePreviewBaseline, setRefinePreviewBaseline] =
-    useState<AdjustmentValues | null>(null)
   const refineSentImageRef = useRef<ImageAsset | null>(null)
   const refineControllerRef = useRef<AbortController | null>(null)
   // 最近一次精修的结果参数（命名恢复锚点："恢复精修"）
@@ -269,9 +270,8 @@ function App() {
     image: null,
     map: new Map(),
   })
-  // V3.1 多轮对话式精修：本张实拍图上已应用的对话轮次 + 当前待确认建议对应的指令
+  // V3.1 多轮对话式精修：本张实拍图上已应用的对话轮次（作为 AI 上下文）
   const [refineTurns, setRefineTurns] = useState<RefineTurn[]>([])
-  const [refinePendingInstruction, setRefinePendingInstruction] = useState('')
   const [beforeStatus, setBeforeStatus] = useState<AnalysisStatus>('idle')
   const [beforeError, setBeforeError] = useState('')
   const [beforeResult, setBeforeResult] = useState<BeforeAnalysisResult | null>(
@@ -299,6 +299,13 @@ function App() {
   const colorAnalysisSoftTimeoutRef = useRef<number | null>(null)
   const beforeAnalysisControllerRef = useRef<AbortController | null>(null)
   const batchExportControllerRef = useRef<AbortController | null>(null)
+  // V3.1 修复「多图复用同一结果」：逐张分析的进度与取消控制
+  const [batchAnalyzing, setBatchAnalyzing] = useState(false)
+  const [batchAnalysisProgress, setBatchAnalysisProgress] = useState<{
+    done: number
+    total: number
+  } | null>(null)
+  const batchAnalysisControllerRef = useRef<AbortController | null>(null)
 
   const currentItem =
     batchImages.find((item) => item.id === selectedImageId) ?? null
@@ -366,8 +373,6 @@ function App() {
   // V3.1：换实拍图 = 新对话，清空多轮精修的对话记录与待确认建议
   useEffect(() => {
     setRefineTurns([])
-    setRefinePendingInstruction('')
-    setRefineSuggestion(null)
     setRefineInstruction('')
     setRefineStatus('idle')
     setRefineError('')
@@ -431,11 +436,17 @@ function App() {
         setActivePresetId(stored.activePresetId)
         setPresetStrength(stored.presetStrength)
         setPreviewMode(stored.previewMode)
-        setAiAnalysis(stored.aiAnalysis)
+        // V3.1 修复白屏：旧版本/旧结构的缓存可能缺字段（如 visualDimensions），
+        // 渲染时读到 undefined 会整页崩。这里统一过一遍归一化补全默认值再写入。
+        setAiAnalysis(
+          stored.aiAnalysis ? normalizeColorAnalysis(stored.aiAnalysis) : null,
+        )
         setAiSnapshot(
           stored.aiSnapshot ? normalizeAdjustmentValues(stored.aiSnapshot) : null,
         )
-        setBeforeResult(stored.beforeResult)
+        setBeforeResult(
+          stored.beforeResult ? normalizeBeforeAnalysis(stored.beforeResult) : null,
+        )
         setExportQuality(stored.exportQuality ?? 'standard')
         setExportMaxEdge(stored.exportMaxEdge ?? 4096)
         setSessionMessage(
@@ -1131,6 +1142,110 @@ function App() {
     }
   }
 
+  // V3.1：逐张分析。修复「多张图复用同一结果」——之前只把当前选中的一张发给 AI，
+  // 现在对所选（无选中则全部）实拍图逐一与目标风格图比对，各自写入各自的调色参数。
+  const runBatchColorAnalysis = async () => {
+    if (!targetImage) {
+      setAnalysisStatus('error')
+      setAnalysisError('请先上传目标风格照。')
+      setAnalysisErrorCode('invalid-image')
+      return
+    }
+    if (!privacyAccepted) {
+      setAnalysisStatus('error')
+      setAnalysisError('请先确认图片会发送到本地 API proxy 并转发给 Gemini API。')
+      setAnalysisErrorCode('configuration')
+      return
+    }
+    const targets =
+      selectedCount > 0
+        ? batchImages.filter((item) => item.selected)
+        : batchImages
+    if (!targets.length) return
+
+    setBatchAnalyzing(true)
+    setBatchAnalysisProgress({ done: 0, total: targets.length })
+    const controller = new AbortController()
+    batchAnalysisControllerRef.current = controller
+    let okCount = 0
+    let failCount = 0
+
+    try {
+      for (let i = 0; i < targets.length; i += 1) {
+        if (controller.signal.aborted) break
+        const photo = targets[i]
+        setBatchImages((current) =>
+          current.map((item) =>
+            item.id === photo.id ? { ...item, analysisStatus: 'loading' } : item,
+          ),
+        )
+        try {
+          const cacheKey = colorAnalysisCacheKey(targetImage, photo.asset)
+          let result = colorAnalysisCacheRef.current.get(cacheKey)
+          if (!result) {
+            result = await analyzeColorMatch(targetImage, photo.asset, {
+              model: selectedModel,
+              signal: controller.signal,
+            })
+            colorAnalysisCacheRef.current.set(cacheKey, result)
+          }
+          // 每张写入「这张自己的」AI 参数（100% 强度，从中性基线混合即等于该建议本身）
+          const next = blendAdjustments(DEFAULT_ADJUSTMENTS, result.adjustments, 100)
+          setBatchImages((current) =>
+            current.map((item) =>
+              item.id === photo.id
+                ? {
+                    ...item,
+                    overrideAdjustments: next,
+                    adjustmentSource: 'ai',
+                    analysisStatus: 'success',
+                  }
+                : item,
+            ),
+          )
+          // 正在看的那张：把它的解析展示在右侧面板
+          if (photo.id === selectedImageId) {
+            setAiAnalysis(result)
+            setAnalysisStatus('success')
+            setAnalysisError('')
+            setAnalysisErrorCode(null)
+          }
+          okCount += 1
+        } catch (error) {
+          if (controller.signal.aborted) break
+          failCount += 1
+          setBatchImages((current) =>
+            current.map((item) =>
+              item.id === photo.id ? { ...item, analysisStatus: 'error' } : item,
+            ),
+          )
+          if (photo.id === selectedImageId) {
+            const apiError = normalizeAnalysisError(error)
+            setAnalysisStatus('error')
+            setAnalysisError(apiError.message)
+            setAnalysisErrorCode(apiError.code)
+          }
+        } finally {
+          setBatchAnalysisProgress({ done: i + 1, total: targets.length })
+        }
+      }
+      const cancelled = controller.signal.aborted
+      setPresetMessage(
+        cancelled
+          ? `已取消逐张分析（成功 ${okCount} 张${failCount ? `，失败 ${failCount} 张` : ''}）。`
+          : `逐张分析完成：成功 ${okCount} 张${failCount ? `，失败 ${failCount} 张` : ''}。每张已写入各自的调色参数，切换图片即可查看。`,
+      )
+    } finally {
+      setBatchAnalyzing(false)
+      setBatchAnalysisProgress(null)
+      batchAnalysisControllerRef.current = null
+    }
+  }
+
+  const cancelBatchAnalysis = () => {
+    batchAnalysisControllerRef.current?.abort()
+  }
+
   const cancelColorAnalysis = () => {
     colorAnalysisControllerRef.current?.abort()
   }
@@ -1171,14 +1286,28 @@ function App() {
   const addRefineDelta = (base: AdjustmentValues, changes: AdjustmentValues) =>
     mapAdjustments(base, (value, key) => value + changes[key])
 
+  // V3.1 #5：精简成「说一句 → 直接生效」。生成的增量立即应用并记入对话；
+  // 回退交给下方手动调整里的「撤销 / 重做」（applyAdjustmentsToScope 已把每步记入历史）。
+  const applyRefineResult = (instruction: string, result: RefineResult) => {
+    const applied = addRefineDelta(currentAdjustments, result.changes)
+    applyAdjustmentsToScope(applied, { source: 'ai', label: 'AI 精修' })
+    setLastRefineAdjustments(applied)
+    setActivePresetId(null)
+    setPresetModified(false)
+    setRefineTurns((prev) => [
+      ...prev,
+      { instruction, changes: result.changes, rationale: result.rationale },
+    ])
+    setRefineInstruction('')
+    setRefineStatus('success')
+    setRefineError('')
+    setPresetMessage('已应用 AI 精修，可继续说下一句；撤销 / 重做可回退。')
+  }
+
   const generateRefine = async () => {
     if (!userImage) return
     const instruction = refineInstruction.trim()
     if (!instruction) return
-    if (refinePreviewBaseline) {
-      applyAdjustmentsToScope(refinePreviewBaseline, { recordHistory: false })
-      setRefinePreviewBaseline(null)
-    }
     // 换图时重置缓存与"已传图"标记
     if (refineCacheRef.current.image !== userImage) {
       refineCacheRef.current = { image: userImage, map: new Map() }
@@ -1188,10 +1317,7 @@ function App() {
     const cacheKey = `${refineTurns.length}::${instruction}`
     const cached = refineCacheRef.current.map.get(cacheKey)
     if (cached) {
-      setRefineSuggestion(cached)
-      setRefinePendingInstruction(instruction)
-      setRefineStatus('success')
-      setRefineError('')
+      applyRefineResult(instruction, cached)
       return
     }
     setRefineStatus('loading')
@@ -1217,81 +1343,13 @@ function App() {
       )
       if (sendImage) refineSentImageRef.current = userImage
       refineCacheRef.current.map.set(cacheKey, result)
-      setRefineSuggestion(result)
-      setRefinePendingInstruction(instruction)
-      setRefineStatus('success')
+      applyRefineResult(instruction, result)
     } catch (error) {
       setRefineStatus('error')
       setRefineError(normalizeAnalysisError(error).message)
     } finally {
       refineControllerRef.current = null
     }
-  }
-
-  const togglePreviewRefine = () => {
-    if (!refineSuggestion) return
-    if (refinePreviewBaseline) {
-      applyAdjustmentsToScope(refinePreviewBaseline, { recordHistory: false })
-      setRefinePreviewBaseline(null)
-    } else {
-      const baseline = currentAdjustments
-      setRefinePreviewBaseline(baseline)
-      applyAdjustmentsToScope(addRefineDelta(baseline, refineSuggestion.changes), {
-        recordHistory: false,
-        source: 'ai',
-      })
-    }
-  }
-
-  const applyRefine = () => {
-    if (!refineSuggestion) return
-    let applied: AdjustmentValues
-    if (refinePreviewBaseline) {
-      // 预览时实时值已是 baseline+delta；把 baseline 以"AI 精修"标签记入历史，撤回即回到 baseline
-      applied = addRefineDelta(refinePreviewBaseline, refineSuggestion.changes)
-      remember('AI 精修', refinePreviewBaseline)
-      setRefinePreviewBaseline(null)
-    } else {
-      applied = addRefineDelta(currentAdjustments, refineSuggestion.changes)
-      applyAdjustmentsToScope(applied, { source: 'ai', label: 'AI 精修' })
-    }
-    setLastRefineAdjustments(applied)
-    setActivePresetId(null)
-    setPresetModified(false)
-    // 记入对话、清空输入与待确认建议，准备下一轮
-    setRefineTurns((prev) => [
-      ...prev,
-      {
-        instruction: refinePendingInstruction || refineInstruction.trim() || '（精修）',
-        changes: refineSuggestion.changes,
-        rationale: refineSuggestion.rationale,
-      },
-    ])
-    setRefineInstruction('')
-    setRefinePendingInstruction('')
-    setRefineSuggestion(null)
-    setPresetMessage('已应用 AI 精修建议，可继续说下一句。')
-  }
-
-  const undoRefine = () => {
-    setRefinePreviewBaseline(null)
-    undoAdjustments()
-    // 同步移除对话里最后一轮（仅作模型上下文，掉队也不影响实际参数）
-    setRefineTurns((prev) => prev.slice(0, -1))
-  }
-
-  // V3.1：重新开始对话（只清对话记录/待确认建议，不动已应用到图上的参数）
-  const resetRefineConversation = () => {
-    if (refinePreviewBaseline) {
-      applyAdjustmentsToScope(refinePreviewBaseline, { recordHistory: false })
-      setRefinePreviewBaseline(null)
-    }
-    setRefineTurns([])
-    setRefineSuggestion(null)
-    setRefineInstruction('')
-    setRefinePendingInstruction('')
-    setRefineStatus('idle')
-    setRefineError('')
   }
 
   // 命名恢复锚点："恢复到上次 AI 精修结果"
@@ -1684,7 +1742,8 @@ function App() {
                       : () => void runColorAnalysis()
                   }
                   disabled={
-                    analysisStatus !== 'loading' && (!targetImage || !userImage)
+                    analysisStatus !== 'loading' &&
+                    (!targetImage || !userImage || batchAnalyzing)
                   }
                 >
                   {analysisStatus === 'loading' ? (
@@ -1694,12 +1753,44 @@ function App() {
                   )}
                   {getColorAnalysisButtonLabel(analysisStatus, analysisSoftTimedOut)}
                 </button>
+                {batchImages.length > 1 && (
+                  <button
+                    type="button"
+                    className="analysis-button"
+                    style={{ marginTop: 8 }}
+                    onClick={
+                      batchAnalyzing
+                        ? cancelBatchAnalysis
+                        : () => void runBatchColorAnalysis()
+                    }
+                    disabled={!batchAnalyzing && !targetImage}
+                  >
+                    {batchAnalyzing ? (
+                      <LoaderCircle size={16} className="spin" />
+                    ) : (
+                      <Grid2X2 size={16} />
+                    )}
+                    {batchAnalyzing
+                      ? `取消逐张分析（${batchAnalysisProgress?.done ?? 0}/${
+                          batchAnalysisProgress?.total ?? 0
+                        }）`
+                      : selectedCount > 0
+                        ? `逐张分析选中的 ${selectedCount} 张`
+                        : `逐张分析全部 ${batchImages.length} 张`}
+                  </button>
+                )}
+                {batchAnalyzing && batchAnalysisProgress && (
+                  <p className="analysis-phase">
+                    正在逐张与目标风格图比对：{batchAnalysisProgress.done}/
+                    {batchAnalysisProgress.total} 张完成…
+                  </p>
+                )}
                 {(analysisStatus === 'loading' || analysisCacheSource) && (
                   <p className="analysis-phase">
                     {analysisStatus === 'loading'
                       ? analysisPhaseLabel(analysisPhase)
                       : analysisCacheSource === 'cached'
-                        ? '已复用同一组图片的最近分析结果。'
+                        ? '已复用这张实拍图与目标图的最近分析结果。'
                         : 'AI 分析完成，本次结果已加入本地缓存。'}
                   </p>
                 )}
@@ -1740,22 +1831,11 @@ function App() {
               </section>
 
               <section className="ai-refine-card">
-                <div className="panel-heading">
+                <div className="panel-heading compact">
                   <div>
                     <span className="panel-kicker">AI 精修</span>
                     <h2>对话式调色</h2>
                   </div>
-                  {refineTurns.length > 0 && (
-                    <button
-                      type="button"
-                      className="icon-button"
-                      onClick={resetRefineConversation}
-                      title="重新开始对话"
-                      aria-label="重新开始对话"
-                    >
-                      <RotateCcw size={16} />
-                    </button>
-                  )}
                 </div>
 
                 {refineTurns.length > 0 && (
@@ -1811,10 +1891,10 @@ function App() {
                     }
                   >
                     {refineStatus === 'loading'
-                      ? '生成中…'
+                      ? '处理中…'
                       : refineTurns.length
                         ? '继续'
-                        : '生成建议'}
+                        : '生成并应用'}
                   </button>
                 </div>
                 {!userImage && (
@@ -1822,50 +1902,6 @@ function App() {
                 )}
                 {refineStatus === 'error' && refineError && (
                   <p className="ai-refine-error">{refineError}</p>
-                )}
-                {refineSuggestion && (
-                  <div className="ai-refine-result ai-refine-pending">
-                    {refineSuggestion.modelNotice && (
-                      <p className="model-notice">⚠ {refineSuggestion.modelNotice}</p>
-                    )}
-                    {refineSuggestion.rationale && (
-                      <p className="ai-refine-rationale">{refineSuggestion.rationale}</p>
-                    )}
-                    <div className="ai-refine-changes">
-                      {Object.entries(refineSuggestion.changes)
-                        .filter(([, value]) => value !== 0)
-                        .map(([key, value]) => (
-                          <span key={key} className="ai-refine-chip">
-                            {ADJUSTMENT_LABELS[key as AdjustmentKey]}{' '}
-                            {formatAdjustmentValue(value)}
-                          </span>
-                        ))}
-                      {Object.values(refineSuggestion.changes).every(
-                        (value) => value === 0,
-                      ) && <span className="ai-refine-chip muted">无明显变化</span>}
-                    </div>
-                    {refineSuggestion.note && (
-                      <p className="ai-refine-note">{refineSuggestion.note}</p>
-                    )}
-                    <div className="ai-result-actions">
-                      <button type="button" onClick={togglePreviewRefine}>
-                        {refinePreviewBaseline ? '收起预览' : '预览建议'}
-                      </button>
-                      <button type="button" className="primary-inline" onClick={applyRefine}>
-                        应用
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {refineTurns.length > 0 && (
-                  <button
-                    type="button"
-                    className="refine-undo"
-                    onClick={undoRefine}
-                    disabled={!historyPast.length}
-                  >
-                    撤回上一轮
-                  </button>
                 )}
               </section>
 
