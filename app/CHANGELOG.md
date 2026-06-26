@@ -1,5 +1,28 @@
 # Changelog
 
+## 3.1.0 - 2026-06-26
+
+Shotai V3.1 — model fallback safety net + multi-round conversational refine:
+
+- **Model fallback**: when the selected Gemini model returns 404 / NOT_FOUND
+  (deprecated, renamed, or temporarily unavailable — preview ids churn), the
+  backend now auto-retries once with a stable model (`gemini-2.5-flash`) instead
+  of surfacing a hard error, and tells the user it switched. New pure,
+  unit-tested helpers in `server/modelFallback.mjs`; `requestGemini` split into
+  an outer model-fallback loop + inner per-model retry. All three endpoints
+  benefit; a `modelNotice` is surfaced in the result views.
+- **AI 精修 is now multi-round / conversational** (拍后): each applied turn is
+  kept as context, so follow-ups like “刚才有点过，回一点暖” / “再冷一点” / “不够”
+  are understood relative to what was already done. The panel is now a thread of
+  numbered applied turns + a pending suggestion (预览 / 应用) + 重新开始 /
+  撤回上一轮. Backend `/api/color-refine` accepts an optional, bounded `history`;
+  switching the source photo starts a fresh conversation. Single-round callers
+  are unchanged.
+- Palette unchanged (warm green, per product choice) — only the new model-fallback
+  notice was tied to the existing `--amber` token for consistency.
+- Verified: lint + 25 tests (incl. fallback + notice passthrough) + vite build +
+  backend syntax check; color-refine smoke-tested with a malformed history payload.
+
 ## 3.0.0 - 2026-06-25
 
 Shotai V3.0 — AI 精修, model switching, and a rebuilt pre-shoot workbench:
