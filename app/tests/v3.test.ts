@@ -69,3 +69,18 @@ test('normalizeColorRefine fills missing keys and clamps to ±100', () => {
   assert.equal(r.changes.exposure, 0)
   assert.equal(r.rationale, '降低色温')
 })
+
+test('normalizeColorRefine 透传后端的模型兜底提示', () => {
+  const r = normalizeColorRefine({
+    changes: {},
+    rationale: '',
+    note: '',
+    modelNotice: '所选模型暂不可用，已自动切换到 gemini-2.5-flash 完成本次请求。',
+  })
+  assert.equal(r.modelNotice, '所选模型暂不可用，已自动切换到 gemini-2.5-flash 完成本次请求。')
+})
+
+test('normalizeColorRefine 无兜底时不带 modelNotice 字段', () => {
+  const r = normalizeColorRefine({ changes: {}, rationale: '', note: '' })
+  assert.equal(r.modelNotice, undefined)
+})

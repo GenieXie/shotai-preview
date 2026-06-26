@@ -1835,6 +1835,9 @@ function AiSuggestionCard({
 }) {
   return (
     <div className="ai-result-card">
+      {result.modelNotice && (
+        <p className="model-notice">⚠ {result.modelNotice}</p>
+      )}
       <article>
         <h3>风格摘要</h3>
         <p>{result.styleSummary}</p>
@@ -2038,6 +2041,9 @@ function BeforeAnalysisPanel({
 
       {result ? (
         <div className="before-result">
+          {result.modelNotice && (
+            <p className="model-notice">⚠ {result.modelNotice}</p>
+          )}
           <div className="confidence-row">
             <span>建议可信度</span>
             <strong>{Math.round(result.confidence * 100)}%</strong>

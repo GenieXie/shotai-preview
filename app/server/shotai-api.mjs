@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { FALLBACK_MODEL, isModelUnavailable, modelsToTry } from './modelFallback.mjs'
 
 const PORT = Number(process.env.PORT || process.env.SHOTAI_API_PORT || 8787)
 const HOST = process.env.SHOTAI_API_HOST || '127.0.0.1'
@@ -215,6 +216,7 @@ function validateImagePayload(value) {
 }
 
 async function analyzeColor({ targetImage, userImage, model }, signal) {
+  const meta = {}
   const payload = await requestGemini({
     contents: [
       {
@@ -244,12 +246,13 @@ async function analyzeColor({ targetImage, userImage, model }, signal) {
       temperature: 0.8,
       maxOutputTokens: 1400,
     },
-  }, signal, model)
+  }, signal, model, meta)
 
-  return normalizeAnalysis(parseGeminiJson(payload))
+  return withModelNotice(normalizeAnalysis(parseGeminiJson(payload)), meta)
 }
 
 async function analyzeBefore(image, signal, model) {
+  const meta = {}
   const payload = await requestGemini({
     contents: [
       {
@@ -279,12 +282,51 @@ async function analyzeBefore(image, signal, model) {
       temperature: 0.8,
       maxOutputTokens: 3000,
     },
-  }, signal, model)
+  }, signal, model, meta)
 
-  return normalizeBeforeAnalysis(parseGeminiJson(payload))
+  return withModelNotice(normalizeBeforeAnalysis(parseGeminiJson(payload)), meta)
 }
 
-async function requestGemini(body, externalSignal, model) {
+// 外层：模型兜底。先用用户选的模型，若它「不存在/已停用」(404/NOT_FOUND) 就自动改用
+// 稳定模型重试一次。meta（可选）会被写入 { requestedModel, usedModel, fellBack }，
+// 供调用方决定是否给用户「已自动切换模型」的提示。
+async function requestGemini(body, externalSignal, model, meta) {
+  const requestedModel = model || GEMINI_MODEL
+  const candidates = modelsToTry(requestedModel, FALLBACK_MODEL)
+  let lastError
+  for (let i = 0; i < candidates.length; i += 1) {
+    const activeModel = candidates[i]
+    try {
+      const payload = await requestGeminiOnce(body, externalSignal, activeModel)
+      if (meta) {
+        meta.requestedModel = requestedModel
+        meta.usedModel = activeModel
+        meta.fellBack = activeModel !== requestedModel
+      }
+      return payload
+    } catch (error) {
+      lastError = error
+      const canFallBack =
+        i < candidates.length - 1 && error?.code === 'GEMINI_MODEL_NOT_FOUND'
+      if (canFallBack) {
+        console.warn(
+          JSON.stringify({
+            event: 'GEMINI_MODEL_FALLBACK',
+            requestedModel,
+            from: activeModel,
+            to: candidates[i + 1],
+          }),
+        )
+        continue
+      }
+      throw error
+    }
+  }
+  throw lastError || new Error('Gemini API 请求失败。')
+}
+
+// 内层：对【单个模型】发请求，含针对 429/5xx 的瞬时重试（行为与改造前一致）。
+async function requestGeminiOnce(body, externalSignal, model) {
   const endpoint =
     `https://generativelanguage.googleapis.com/v1beta/models/` +
     `${encodeURIComponent(model || GEMINI_MODEL)}:generateContent`
@@ -461,6 +503,14 @@ function normalizeBeforeAnalysis(value) {
   }
 }
 
+// 若本次请求触发了模型兜底，给结果附上一句提示，让用户知道用的不是自己选的模型。
+function withModelNotice(result, meta) {
+  if (result && meta?.fellBack) {
+    result.modelNotice = `所选模型暂不可用，已自动切换到 ${meta.usedModel} 完成本次请求。`
+  }
+  return result
+}
+
 function normalizeText(value, fallback) {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback
 }
@@ -547,6 +597,8 @@ function mimeType(path) {
 }
 
 function classifyGeminiError(status, providerCode) {
+  // 模型不存在/已停用：交给上层 requestGemini 触发模型兜底。
+  if (isModelUnavailable(status, providerCode)) return 'GEMINI_MODEL_NOT_FOUND'
   if (status === 400) return 'GEMINI_INVALID_REQUEST'
   if (status === 401 || status === 403) return 'GEMINI_AUTH_ERROR'
   if (status === 429) return 'GEMINI_QUOTA_OR_RATE_LIMIT'
@@ -716,6 +768,7 @@ function sanitizeAdjustments(value) {
 }
 
 async function refineColor({ instruction, currentAdjustments, image, model }, signal) {
+  const meta = {}
   const parts = [
     {
       text: [
@@ -745,9 +798,10 @@ async function refineColor({ instruction, currentAdjustments, image, model }, si
     },
     signal,
     model,
+    meta,
   )
 
-  return normalizeRefine(parseGeminiJson(payload))
+  return withModelNotice(normalizeRefine(parseGeminiJson(payload)), meta)
 }
 
 function colorRefineSchema() {

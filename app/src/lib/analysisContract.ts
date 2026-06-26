@@ -27,6 +27,8 @@ export interface ColorAnalysisResult {
   risks: string[]
   adjustments: AdjustmentValues
   confidence: number
+  /** V3.1：所选模型不可用、后端自动兜底时的提示文案 */
+  modelNotice?: string
 }
 
 export interface BeforeVisualDimensions {
@@ -47,6 +49,8 @@ export interface BeforeAnalysisResult {
   visualDimensions: BeforeVisualDimensions
   confidence: number
   uncertainty: string
+  /** V3.1：所选模型不可用、后端自动兜底时的提示文案 */
+  modelNotice?: string
 }
 
 export function normalizeColorAnalysis(value: unknown): ColorAnalysisResult {
@@ -84,6 +88,7 @@ export function normalizeColorAnalysis(value: unknown): ColorAnalysisResult {
       typeof record.confidence === 'number'
         ? Math.max(0, Math.min(1, record.confidence))
         : 0.72,
+    ...modelNoticeOf(record),
   }
 }
 
@@ -115,6 +120,7 @@ export function normalizeBeforeAnalysis(value: unknown): BeforeAnalysisResult {
       record.uncertainty,
       '参数为视觉推测，需根据现场光线调整。',
     ),
+    ...modelNoticeOf(record),
   }
 }
 
@@ -136,6 +142,8 @@ export interface RefineResult {
   changes: AdjustmentValues
   rationale: string
   note: string
+  /** V3.1：所选模型不可用、后端自动兜底时的提示文案 */
+  modelNotice?: string
 }
 
 export function normalizeColorRefine(value: unknown): RefineResult {
@@ -147,6 +155,7 @@ export function normalizeColorRefine(value: unknown): RefineResult {
     changes: normalizeAdjustmentValues(record.changes),
     rationale: normalizeText(record.rationale, ''),
     note: normalizeText(record.note, ''),
+    ...modelNoticeOf(record),
   }
 }
 
@@ -186,6 +195,13 @@ function normalizeParameterRationales(
         reason: 'AI 建议以此作为当前风格迁移的调色起点。',
       }
     })
+}
+
+// V3.1：把后端可能附带的「已自动切换模型」提示透传出去（无则不带该字段）。
+function modelNoticeOf(record: Record<string, unknown>): { modelNotice?: string } {
+  return typeof record.modelNotice === 'string' && record.modelNotice.trim()
+    ? { modelNotice: record.modelNotice.trim() }
+    : {}
 }
 
 function normalizeText(value: unknown, fallback: string) {
