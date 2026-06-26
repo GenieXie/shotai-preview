@@ -103,6 +103,13 @@ type ApiHealth = 'checking' | 'ready' | 'degraded' | 'offline'
 type ApplyScope = 'current' | 'selected' | 'all'
 type AnalysisCacheSource = 'fresh' | 'cached' | null
 
+// V3.1 多轮对话式精修：一条已应用的对话轮次
+interface RefineTurn {
+  instruction: string
+  changes: AdjustmentValues
+  rationale: string
+}
+
 // V3.0：带来源标签的撤销/重做条目（消除 AI 与手动混淆）
 interface HistoryEntry {
   values: AdjustmentValues
@@ -262,6 +269,9 @@ function App() {
     image: null,
     map: new Map(),
   })
+  // V3.1 多轮对话式精修：本张实拍图上已应用的对话轮次 + 当前待确认建议对应的指令
+  const [refineTurns, setRefineTurns] = useState<RefineTurn[]>([])
+  const [refinePendingInstruction, setRefinePendingInstruction] = useState('')
   const [beforeStatus, setBeforeStatus] = useState<AnalysisStatus>('idle')
   const [beforeError, setBeforeError] = useState('')
   const [beforeResult, setBeforeResult] = useState<BeforeAnalysisResult | null>(
@@ -352,6 +362,16 @@ function App() {
   useEffect(() => {
     saveCustomPresets(customPresets)
   }, [customPresets])
+
+  // V3.1：换实拍图 = 新对话，清空多轮精修的对话记录与待确认建议
+  useEffect(() => {
+    setRefineTurns([])
+    setRefinePendingInstruction('')
+    setRefineSuggestion(null)
+    setRefineInstruction('')
+    setRefineStatus('idle')
+    setRefineError('')
+  }, [userImage])
 
   useEffect(() => {
     let cancelled = false
@@ -1164,10 +1184,12 @@ function App() {
       refineCacheRef.current = { image: userImage, map: new Map() }
       refineSentImageRef.current = null
     }
-    // 命中缓存：同图同指令直接返回，不再调用
-    const cached = refineCacheRef.current.map.get(instruction)
+    // 缓存键带上轮次：同一句话在对话不同位置语义不同，不能共用缓存
+    const cacheKey = `${refineTurns.length}::${instruction}`
+    const cached = refineCacheRef.current.map.get(cacheKey)
     if (cached) {
       setRefineSuggestion(cached)
+      setRefinePendingInstruction(instruction)
       setRefineStatus('success')
       setRefineError('')
       return
@@ -1183,11 +1205,20 @@ function App() {
         instruction,
         currentAdjustments,
         sendImage ? userImage : null,
-        { model: selectedModel, signal: controller.signal },
+        {
+          model: selectedModel,
+          signal: controller.signal,
+          // 把已应用的对话轮次作为上下文，让 AI 理解“再/更/刚才”等承上启下的话
+          history: refineTurns.map((turn) => ({
+            instruction: turn.instruction,
+            changes: turn.changes,
+          })),
+        },
       )
       if (sendImage) refineSentImageRef.current = userImage
-      refineCacheRef.current.map.set(instruction, result)
+      refineCacheRef.current.map.set(cacheKey, result)
       setRefineSuggestion(result)
+      setRefinePendingInstruction(instruction)
       setRefineStatus('success')
     } catch (error) {
       setRefineStatus('error')
@@ -1227,13 +1258,40 @@ function App() {
     setLastRefineAdjustments(applied)
     setActivePresetId(null)
     setPresetModified(false)
-    setPresetMessage('已应用 AI 精修建议。')
-    // 保留 refineSuggestion 与指令：可再次应用 / 查看（你要的"可缓存、可返回"）
+    // 记入对话、清空输入与待确认建议，准备下一轮
+    setRefineTurns((prev) => [
+      ...prev,
+      {
+        instruction: refinePendingInstruction || refineInstruction.trim() || '（精修）',
+        changes: refineSuggestion.changes,
+        rationale: refineSuggestion.rationale,
+      },
+    ])
+    setRefineInstruction('')
+    setRefinePendingInstruction('')
+    setRefineSuggestion(null)
+    setPresetMessage('已应用 AI 精修建议，可继续说下一句。')
   }
 
   const undoRefine = () => {
     setRefinePreviewBaseline(null)
     undoAdjustments()
+    // 同步移除对话里最后一轮（仅作模型上下文，掉队也不影响实际参数）
+    setRefineTurns((prev) => prev.slice(0, -1))
+  }
+
+  // V3.1：重新开始对话（只清对话记录/待确认建议，不动已应用到图上的参数）
+  const resetRefineConversation = () => {
+    if (refinePreviewBaseline) {
+      applyAdjustmentsToScope(refinePreviewBaseline, { recordHistory: false })
+      setRefinePreviewBaseline(null)
+    }
+    setRefineTurns([])
+    setRefineSuggestion(null)
+    setRefineInstruction('')
+    setRefinePendingInstruction('')
+    setRefineStatus('idle')
+    setRefineError('')
   }
 
   // 命名恢复锚点："恢复到上次 AI 精修结果"
@@ -1685,15 +1743,60 @@ function App() {
                 <div className="panel-heading">
                   <div>
                     <span className="panel-kicker">AI 精修</span>
-                    <h2>自然语言调色</h2>
+                    <h2>对话式调色</h2>
                   </div>
+                  {refineTurns.length > 0 && (
+                    <button
+                      type="button"
+                      className="icon-button"
+                      onClick={resetRefineConversation}
+                      title="重新开始对话"
+                      aria-label="重新开始对话"
+                    >
+                      <RotateCcw size={16} />
+                    </button>
+                  )}
                 </div>
+
+                {refineTurns.length > 0 && (
+                  <ol className="refine-thread">
+                    {refineTurns.map((turn, index) => (
+                      <li key={index} className="refine-turn">
+                        <p className="refine-turn-instruction">
+                          <span className="refine-turn-index">{index + 1}</span>
+                          {turn.instruction}
+                        </p>
+                        <div className="ai-refine-changes">
+                          {Object.entries(turn.changes)
+                            .filter(([, value]) => value !== 0)
+                            .map(([key, value]) => (
+                              <span key={key} className="ai-refine-chip">
+                                {ADJUSTMENT_LABELS[key as AdjustmentKey]}{' '}
+                                {formatAdjustmentValue(value)}
+                              </span>
+                            ))}
+                          {Object.values(turn.changes).every((value) => value === 0) && (
+                            <span className="ai-refine-chip muted">无明显变化</span>
+                          )}
+                        </div>
+                        {turn.rationale && (
+                          <p className="ai-refine-rationale">{turn.rationale}</p>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                )}
+
                 <div className="ai-refine-input">
                   <input
                     type="text"
                     value={refineInstruction}
                     onChange={(event) => setRefineInstruction(event.target.value)}
-                    placeholder="再冷一点，但保留肤色"
+                    placeholder={
+                      refineTurns.length
+                        ? '继续微调，如“刚才有点过，回一点暖”'
+                        : '再冷一点，但保留肤色'
+                    }
                     disabled={!userImage || refineStatus === 'loading'}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') void generateRefine()
@@ -1707,7 +1810,11 @@ function App() {
                       !userImage || !refineInstruction.trim() || refineStatus === 'loading'
                     }
                   >
-                    {refineStatus === 'loading' ? '生成中…' : '生成建议'}
+                    {refineStatus === 'loading'
+                      ? '生成中…'
+                      : refineTurns.length
+                        ? '继续'
+                        : '生成建议'}
                   </button>
                 </div>
                 {!userImage && (
@@ -1717,7 +1824,10 @@ function App() {
                   <p className="ai-refine-error">{refineError}</p>
                 )}
                 {refineSuggestion && (
-                  <div className="ai-refine-result">
+                  <div className="ai-refine-result ai-refine-pending">
+                    {refineSuggestion.modelNotice && (
+                      <p className="model-notice">⚠ {refineSuggestion.modelNotice}</p>
+                    )}
                     {refineSuggestion.rationale && (
                       <p className="ai-refine-rationale">{refineSuggestion.rationale}</p>
                     )}
@@ -1744,15 +1854,18 @@ function App() {
                       <button type="button" className="primary-inline" onClick={applyRefine}>
                         应用
                       </button>
-                      <button
-                        type="button"
-                        onClick={undoRefine}
-                        disabled={!historyPast.length}
-                      >
-                        撤回上一轮
-                      </button>
                     </div>
                   </div>
+                )}
+                {refineTurns.length > 0 && (
+                  <button
+                    type="button"
+                    className="refine-undo"
+                    onClick={undoRefine}
+                    disabled={!historyPast.length}
+                  >
+                    撤回上一轮
+                  </button>
                 )}
               </section>
 

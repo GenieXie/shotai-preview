@@ -146,6 +146,12 @@ export interface RefineResult {
   modelNotice?: string
 }
 
+/** V3.1 多轮对话式精修：发给后端的「已应用步骤」上下文 */
+export interface RefineHistoryTurn {
+  instruction: string
+  changes: AdjustmentValues
+}
+
 export function normalizeColorRefine(value: unknown): RefineResult {
   if (!value || typeof value !== 'object') {
     throw new Error('AI 返回的精修结果格式错误。')

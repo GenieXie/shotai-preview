@@ -7,6 +7,7 @@ import {
 import type {
   BeforeAnalysisResult,
   ColorAnalysisResult,
+  RefineHistoryTurn,
   RefineResult,
 } from './analysisContract'
 import type { AdjustmentValues } from './imageAdjustments'
@@ -82,12 +83,23 @@ export async function refineColorAdjustments(
   instruction: string,
   currentAdjustments: AdjustmentValues,
   image: ImageAsset | null,
-  options: { model?: string; signal?: AbortSignal } = {},
+  options: {
+    model?: string
+    signal?: AbortSignal
+    /** V3.1：多轮对话已应用的步骤，供后端理解承上启下的指令 */
+    history?: RefineHistoryTurn[]
+  } = {},
 ): Promise<RefineResult> {
   const imagePayload = image ? await encodeImageForAnalysis(image) : undefined
   const payload = await requestAnalysis(
     '/api/color-refine',
-    { instruction, currentAdjustments, image: imagePayload, model: options.model },
+    {
+      instruction,
+      currentAdjustments,
+      image: imagePayload,
+      model: options.model,
+      history: options.history,
+    },
     options.signal,
   )
   return normalizeColorRefine(payload)
