@@ -1550,8 +1550,7 @@ function App() {
           </section>
         ) : (
           <section className="v2-workbench">
-            <div className="workbench-main">
-              <div className="material-section">
+            <div className="material-section">
                 <div className="reference-strip">
                   <ImageUploader
                     compact
@@ -1632,47 +1631,49 @@ function App() {
                   exportMessage={batchExportMessage}
                   onPreview={(asset) => setLightbox({ image: asset, title: asset.file.name })}
                 />
-              </div>
-
-              <CanvasPreview
-                image={userImage}
-                adjustments={currentAdjustments}
-                mode={previewMode}
-                risks={previewRisks}
-                renderStatus={previewStatus}
-                exportQuality={exportQuality}
-                exportMaxEdge={exportMaxEdge}
-                onModeChange={setPreviewMode}
-                onPreview={(image) => setLightbox({ image, title: '主预览' })}
-                onRenderStatusChange={setPreviewStatus}
-                onRisksChange={setPreviewRisks}
-                onRenderMetric={recordPreviewMetric}
-              />
             </div>
 
-            <aside className="control-column v2-controls">
-              <section className="performance-panel">
-                <button
-                  type="button"
-                  className="performance-toggle"
-                  onClick={() => setShowPerformancePanel((current) => !current)}
-                  aria-expanded={showPerformancePanel}
-                >
-                  <Activity size={15} />
-                  性能
-                  <span>{showPerformancePanel ? '收起' : '查看'}</span>
-                </button>
-                {showPerformancePanel && (
-                  <PerformancePanel
-                    currentImage={userImage}
-                    queueCount={batchImages.length}
-                    previewStatus={previewStatus}
-                    metrics={performanceMetrics}
-                    cacheCount={colorAnalysisCacheRef.current.size}
-                  />
-                )}
-              </section>
-              <section className="scope-panel">
+            <div className="main-row">
+              <div className="col-left">
+                <CanvasPreview
+                  image={userImage}
+                  adjustments={currentAdjustments}
+                  mode={previewMode}
+                  risks={previewRisks}
+                  renderStatus={previewStatus}
+                  exportQuality={exportQuality}
+                  exportMaxEdge={exportMaxEdge}
+                  onModeChange={setPreviewMode}
+                  onPreview={(image) => setLightbox({ image, title: '主预览' })}
+                  onRenderStatusChange={setPreviewStatus}
+                  onRisksChange={setPreviewRisks}
+                  onRenderMetric={recordPreviewMetric}
+                />
+                <section className="performance-panel">
+                  <button
+                    type="button"
+                    className="performance-toggle"
+                    onClick={() => setShowPerformancePanel((current) => !current)}
+                    aria-expanded={showPerformancePanel}
+                  >
+                    <Activity size={15} />
+                    性能
+                    <span>{showPerformancePanel ? '收起' : '查看'}</span>
+                  </button>
+                  {showPerformancePanel && (
+                    <PerformancePanel
+                      currentImage={userImage}
+                      queueCount={batchImages.length}
+                      previewStatus={previewStatus}
+                      metrics={performanceMetrics}
+                      cacheCount={colorAnalysisCacheRef.current.size}
+                    />
+                  )}
+                </section>
+              </div>
+
+              <aside className="control-column v2-controls col-right">
+                <section className="scope-panel">
                 <div className="panel-heading compact">
                   <div>
                     <span className="panel-kicker">当前作用范围</span>
@@ -1954,6 +1955,7 @@ function App() {
                 message={presetMessage}
               />
             </aside>
+            </div>
           </section>
         )}
       </main>

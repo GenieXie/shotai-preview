@@ -535,10 +535,35 @@ main {
 .v2-workbench {
   /* V3.1 #4：min-height 取代固定 height，内容超过一屏时整页可自然滚动（原来只有右栏能滚） */
   min-height: max(760px, calc(100vh - 84px));
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(330px, 370px);
+  /* V3.2：对齐原型三区布局 —— 素材条置顶通栏，下面再分「预览列 | 控件列」 */
+  display: flex;
+  flex-direction: column;
   gap: 14px;
-  align-items: start;
+}
+
+.main-row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+/* 左列：主预览（变方、变大）+ 性能面板置于其下 */
+.col-left {
+  flex: 1.35;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.col-left .performance-panel {
+  margin: 0;
+}
+
+/* 右列：所有控件（作用范围 / AI 分析 / AI 精修 / 手动调整 / 预设） */
+.col-right {
+  flex: 1;
+  min-width: 360px;
 }
 
 .workbench-main {
@@ -559,6 +584,8 @@ main {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+  /* V3.2：素材条置顶通栏后，限制目标/当前两卡片宽度，避免被拉得过大 */
+  max-width: 760px;
 }
 
 .control-column {
@@ -2077,7 +2104,14 @@ main {
 @media (max-width: 1180px) {
   .v2-workbench {
     height: auto;
-    grid-template-columns: 1fr;
+  }
+
+  .main-row {
+    flex-direction: column;
+  }
+
+  .col-right {
+    min-width: 0;
   }
 
   .v2-controls {
