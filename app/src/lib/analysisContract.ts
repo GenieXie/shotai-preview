@@ -105,13 +105,25 @@ export function normalizeBeforeAnalysis(value: unknown): BeforeAnalysisResult {
   }
 
   const record = value as Record<string, unknown>
+  const scene = normalizeText(record.scene, '未能识别场景信息。')
+  const lighting = normalizeText(record.lighting, '未能识别光线信息。')
+  const composition = normalizeText(record.composition, '未能识别构图信息。')
+  const cameraSettings = normalizeStringArray(record.cameraSettings, [])
+  const executionTips = normalizeStringArray(record.executionTips, [])
+  const visualDimensions = normalizeVisualDimensions(record.visualDimensions)
   return {
-    scene: normalizeText(record.scene, '未能识别场景信息。'),
-    lighting: normalizeText(record.lighting, '未能识别光线信息。'),
-    composition: normalizeText(record.composition, '未能识别构图信息。'),
-    cameraSettings: normalizeStringArray(record.cameraSettings, []),
-    executionTips: normalizeStringArray(record.executionTips, []),
-    visualDimensions: normalizeVisualDimensions(record.visualDimensions),
+    scene,
+    lighting,
+    composition,
+    cameraSettings,
+    executionTips,
+    visualDimensions: fillVisualDimensions(visualDimensions, [
+      scene,
+      lighting,
+      composition,
+      ...cameraSettings,
+      ...executionTips,
+    ]),
     confidence:
       typeof record.confidence === 'number'
         ? Math.max(0, Math.min(1, record.confidence))
@@ -122,6 +134,104 @@ export function normalizeBeforeAnalysis(value: unknown): BeforeAnalysisResult {
     ),
     ...modelNoticeOf(record),
   }
+}
+
+function fillVisualDimensions(
+  dimensions: BeforeVisualDimensions,
+  sourceTexts: string[],
+): BeforeVisualDimensions {
+  const corpus = sourceTexts
+    .map((text) => text.trim())
+    .filter(Boolean)
+    .join('。')
+
+  if (!corpus) return dimensions
+
+  return {
+    colorTendency: fillDimension(
+      dimensions.colorTendency,
+      corpus,
+      [
+        ['冷', '冷调、清爽'],
+        ['暖', '暖调、柔和'],
+        ['蓝', '偏蓝、清透'],
+        ['绿', '蓝绿保留'],
+        ['白', '白色占比高'],
+      ],
+      '自然色彩',
+    ),
+    lightDirection: fillDimension(
+      dimensions.lightDirection,
+      corpus,
+      [
+        ['侧', '侧顺光'],
+        ['逆光', '逆光轮廓'],
+        ['柔光', '柔和散射光'],
+        ['阴影', '阴影柔和'],
+        ['阳光', '自然日光'],
+      ],
+      '自然光线',
+    ),
+    contrast: fillDimension(
+      dimensions.contrast,
+      corpus,
+      [
+        ['高对比', '高对比'],
+        ['低对比', '低对比'],
+        ['柔和', '中低对比'],
+        ['清晰', '中等对比'],
+        ['层次', '层次保留'],
+      ],
+      '中等对比',
+    ),
+    tone: fillDimension(
+      dimensions.tone,
+      corpus,
+      [
+        ['明亮', '明亮通透'],
+        ['通透', '明亮通透'],
+        ['暗', '低调沉稳'],
+        ['清爽', '清爽干净'],
+        ['厚重', '厚重安静'],
+      ],
+      '自然影调',
+    ),
+    temperature: fillDimension(
+      dimensions.temperature,
+      corpus,
+      [
+        ['冷', '略偏冷'],
+        ['暖', '略偏暖'],
+        ['蓝', '略偏冷'],
+        ['日光', '日光色温'],
+        ['白', '中性色温'],
+      ],
+      '中性色温',
+    ),
+    saturation: fillDimension(
+      dimensions.saturation,
+      corpus,
+      [
+        ['低饱和', '低饱和'],
+        ['淡', '低饱和'],
+        ['高饱和', '高饱和'],
+        ['浓郁', '较高饱和'],
+        ['自然', '自然饱和'],
+      ],
+      '自然饱和',
+    ),
+  }
+}
+
+function fillDimension(
+  value: string,
+  corpus: string,
+  matches: Array<[string, string]>,
+  fallback: string,
+) {
+  if (value && value !== '—') return value
+  const found = matches.find(([keyword]) => corpus.includes(keyword))
+  return found?.[1] ?? fallback
 }
 
 function normalizeVisualDimensions(value: unknown): BeforeVisualDimensions {

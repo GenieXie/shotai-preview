@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { beforeAnalysisToAdjustments } from '../src/lib/beforeMapping.ts'
 import { DEFAULT_ADJUSTMENTS } from '../src/lib/imageAdjustments.ts'
-import { normalizeColorRefine } from '../src/lib/analysisContract.ts'
+import { normalizeBeforeAnalysis, normalizeColorRefine } from '../src/lib/analysisContract.ts'
 import type { BeforeAnalysisResult } from '../src/lib/analysisContract.ts'
 
 function makeBefore(
@@ -56,6 +56,23 @@ test('beforeAnalysisToAdjustments maps 暖/高对比/高饱和/暗调', () => {
 test('beforeAnalysisToAdjustments leaves defaults for neutral text', () => {
   const adj = beforeAnalysisToAdjustments(makeBefore({ colorTendency: '中性自然' }))
   assert.deepEqual(adj, DEFAULT_ADJUSTMENTS)
+})
+
+test('normalizeBeforeAnalysis derives visual dimensions when model omits them', () => {
+  const result = normalizeBeforeAnalysis({
+    scene: '明亮的冬日雪景，白色建筑占比高，天空偏蓝。',
+    lighting: '自然日光和柔和散射光，阴影较轻。',
+    composition: '主体居中，线条清晰。',
+    cameraSettings: ['日光色温'],
+    executionTips: ['保持自然饱和，避免过曝。'],
+    visualDimensions: {},
+  })
+  assert.notEqual(result.visualDimensions.colorTendency, '—')
+  assert.notEqual(result.visualDimensions.lightDirection, '—')
+  assert.notEqual(result.visualDimensions.contrast, '—')
+  assert.notEqual(result.visualDimensions.tone, '—')
+  assert.notEqual(result.visualDimensions.temperature, '—')
+  assert.notEqual(result.visualDimensions.saturation, '—')
 })
 
 test('normalizeColorRefine fills missing keys and clamps to ±100', () => {
