@@ -4,11 +4,11 @@ Shotai is an AI-assisted photography and color-grading workspace.
 
 ## Current Version
 
-V2.3.1 performance and production-experience release. Building on the V2.2
-stable color workbench, V2.3 adds faster preview rendering, reusable Worker
-processing, concurrent batch export, export controls, faster AI analysis,
-AI phase feedback, same-image analysis caching, and a compact performance panel.
-See `CHANGELOG.md` for the full V2 history.
+V3.2.0 prototype-aligned workbench review build. Building on V3.1's model
+fallback and multi-round AI refine work, V3.2 tightens the post-shoot layout
+around the V3 prototype: a compact material strip, larger preview workspace,
+and denser right-side controls for review.
+See `CHANGELOG.md` for the full version history.
 
 Core workbench capabilities:
 

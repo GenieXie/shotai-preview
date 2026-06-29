@@ -45,7 +45,6 @@ interface AdjustmentPanelProps {
   values: AdjustmentValues
   aiValues?: AdjustmentValues | null
   presetValues?: AdjustmentValues | null
-  refineValues?: AdjustmentValues | null
   canUndo: boolean
   canRedo: boolean
   onChange: (values: AdjustmentValues) => void
@@ -53,7 +52,6 @@ interface AdjustmentPanelProps {
   onResetGroup: (groupId: AdjustmentGroupId) => void
   onResetAll: () => void
   onRestoreAi: () => void
-  onRestoreRefine: () => void
   onRestorePreset: () => void
   onUndo: () => void
   onRedo: () => void
@@ -65,7 +63,6 @@ export function AdjustmentPanel({
   values,
   aiValues,
   presetValues,
-  refineValues,
   canUndo,
   canRedo,
   onChange,
@@ -73,7 +70,6 @@ export function AdjustmentPanel({
   onResetGroup,
   onResetAll,
   onRestoreAi,
-  onRestoreRefine,
   onRestorePreset,
   onUndo,
   onRedo,
@@ -108,9 +104,6 @@ export function AdjustmentPanel({
         </button>
         <button type="button" onClick={onRestoreAi} disabled={!aiValues}>
           恢复调色建议
-        </button>
-        <button type="button" onClick={onRestoreRefine} disabled={!refineValues}>
-          恢复精修
         </button>
         <button type="button" onClick={onRestorePreset} disabled={!presetValues}>
           恢复预设

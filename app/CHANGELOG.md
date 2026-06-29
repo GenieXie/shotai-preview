@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.2.0 - 2026-06-28
+
+Shotai V3.2 — prototype-aligned post-shoot workbench review build:
+
+- Aligns the post-shoot workbench toward the V3 prototype with a compact
+  material area, compressed batch queue, larger central preview, and denser
+  right-side controls.
+- Keeps the V3.1 AI model fallback and multi-round AI refine behavior intact
+  while reshaping the review surface for faster visual inspection.
+- Adds local prototype assets under `prototypes/shotai-v3` for side-by-side
+  design review.
+
 ## 3.1.0 - 2026-06-26
 
 Shotai V3.1 — model fallback safety net + multi-round conversational refine:

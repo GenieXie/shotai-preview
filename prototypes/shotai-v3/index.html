@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shotai V3.0 Prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="boards">
+      <section class="screen" id="before">
+        <header class="topbar">
+          <div class="brand"><span class="mark">S</span><strong>Shotai</strong><span class="tag">V3.0</span></div>
+          <nav>
+            <button class="active">拍前参考</button>
+            <button>调色工作台</button>
+            <button>预设中心</button>
+            <button>历史记录</button>
+          </nav>
+          <div class="top-actions"><span class="health">AI 服务 · 正常</span><span>帮助</span><span class="avatar">张三</span></div>
+        </header>
+
+        <div class="workspace before-layout">
+          <section class="main-column">
+            <div class="material-bar">
+              <article class="upload-card compact">
+                <p class="label">参考图队列</p>
+                <div class="upload-box">上传参考照片</div>
+              </article>
+              <div class="strip wide">
+                <article class="thumb selected"><img src="./assets/queue-1.jpg" /><b>湖边人像</b><span>当前分析图</span></article>
+                <article class="thumb"><img src="./assets/mountain-target.jpg" /><b>雪山湖泊</b><span>场景参考</span></article>
+                <article class="thumb"><img src="./assets/queue-2.jpg" /><b>海边侧光</b><span>光线参考</span></article>
+                <article class="thumb"><img src="./assets/preset-2.jpg" /><b>胶片低反差</b><span>色彩参考</span></article>
+                <button class="add-card">添加更多</button>
+              </div>
+            </div>
+
+            <section class="preview-card">
+              <div class="preview-toolbar">
+                <div><p class="label">主预览</p><h1>拍前分析</h1></div>
+                <div class="segmented"><button class="active">当前图</button><button>网格</button><button>全屏</button></div>
+              </div>
+              <div class="photo-stage before-photo"><img src="./assets/lake-portrait-main.jpg" /></div>
+              <div class="exif-row">
+                <span>Canon EOS R6 Mark II</span><span>ISO 100</span><span>24mm</span><span>f/5.6</span><span>1/500s</span><span>曝光补偿 0EV</span>
+              </div>
+            </section>
+          </section>
+
+          <aside class="control-column">
+            <section class="panel ai-panel">
+              <div class="panel-head"><div><p class="label">AI 拍摄建议</p><h2>生成后由你确认使用</h2></div><span class="chip green">可信度 88%</span></div>
+              <label class="privacy"><input type="checkbox" checked /> 我确认分析时会将选中的参考图发送到本地 API proxy。</label>
+              <div class="analysis-grid">
+                <span><b>色彩倾向</b>冷调、低饱和、空气感强</span>
+                <span><b>光线方向</b>顺侧光，云层柔化高光</span>
+                <span><b>对比度</b>中低反差，暗部保留细节</span>
+                <span><b>影调</b>明亮通透，蓝色占比高</span>
+                <span><b>色温</b>约 5200K，略偏冷</span>
+                <span><b>饱和度</b>蓝绿保留，肤色自然</span>
+              </div>
+              <div class="callout">
+                <b>现场执行建议</b>
+                <p>选择上午 9:00-10:30 或薄云天气，人物背向湖面，镜头略低于肩线；先压住天空高光，再用反光板补面部阴影。</p>
+              </div>
+            </section>
+
+            <section class="panel refine-panel">
+              <div class="panel-head"><div><p class="label">AI 拍前精修</p><h2>自然语言改拍摄方案</h2></div></div>
+              <div class="prompt-row"><input value="更适合傍晚拍，但不要太暗" /><button>生成建议</button></div>
+              <p class="subhead">建议变更</p>
+              <div class="change-grid">
+                <span>白平衡 <b>-400K</b></span><span>曝光 <b>-0.3EV</b></span><span>补光 <b>+1 档</b></span><span>饱和 <b>-8</b></span><span>对比 <b>+6</b></span>
+              </div>
+              <div class="button-row"><button>预览建议</button><button class="primary">应用</button><button>撤回上一轮</button></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head"><div><p class="label">闭环动作</p><h2>连接拍后调色</h2></div></div>
+              <div class="action-stack">
+                <button class="primary wide-btn">保存为拍后预设</button>
+                <button class="wide-btn">发送到拍后调色</button>
+                <button class="wide-btn">复制拍摄方案</button>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </section>
+
+      <section class="screen" id="after">
+        <header class="topbar">
+          <div class="brand"><span class="mark">S</span><strong>Shotai</strong><span class="tag">V3.0</span></div>
+          <nav>
+            <button>拍前参考</button>
+            <button class="active">调色工作台</button>
+            <button>预设中心</button>
+            <button>历史记录</button>
+          </nav>
+          <div class="top-actions"><span class="health">AI 服务 · 正常</span><span>帮助</span><span class="avatar">张三</span></div>
+        </header>
+
+        <div class="workspace after-layout">
+          <section class="main-column">
+            <div class="material-bar">
+              <article class="upload-card"><p class="label">目标风格照</p><img src="./assets/mountain-target.jpg" /><b>清新自然</b></article>
+              <article class="current-shot"><p class="label">当前实拍</p><img src="./assets/queue-1.jpg" /><div><b>IMG_2048.JPG</b><span>已套用 AI 建议 · 50%</span></div></article>
+              <div class="strip">
+                <article class="thumb selected"><img src="./assets/queue-1.jpg" /><b>当前</b></article>
+                <article class="thumb"><img src="./assets/queue-2.jpg" /><b>选中</b></article>
+                <article class="thumb"><img src="./assets/queue-3.jpg" /><b>待处理</b></article>
+                <article class="thumb"><img src="./assets/queue-4.jpg" /><b>已完成</b></article>
+                <article class="thumb"><img src="./assets/queue-5.jpg" /><b>失败</b></article>
+                <button class="add-card">添加更多</button>
+              </div>
+            </div>
+
+            <section class="preview-card">
+              <div class="preview-toolbar">
+                <div><p class="label">主预览</p><h1>调色工作台</h1></div>
+                <div class="segmented"><button>原图</button><button class="active">调整后</button><button>并排</button><button>分割</button></div>
+                <div class="risk-row"><span>高光</span><span>阴影</span><span class="ok">饱和</span></div>
+              </div>
+              <div class="photo-stage"><img src="./assets/lake-portrait-main.jpg" /></div>
+              <div class="preview-bottom"><span>100%</span><span>软打样</span><span>已更新</span></div>
+            </section>
+          </section>
+
+          <aside class="control-column">
+            <section class="panel small">
+              <div class="panel-head"><div><p class="label">当前作用范围</p><h2>参数应用到哪里</h2></div></div>
+              <div class="segmented full"><button class="active">当前图</button><button>选中图</button><button>全部</button></div>
+            </section>
+
+            <section class="panel ai-panel">
+              <div class="panel-head"><div><p class="label">AI 风格分析</p><h2>生成后由你确认应用</h2></div><button class="ghost">重新分析</button></div>
+              <p class="body">整体偏冷色调，清新通透；天空蓝与湖水蓝为主，肤色自然明亮，对比适中，层次清晰。</p>
+              <div class="mini-tags"><span>高光 -20</span><span>阴影 +15</span><span>饱和 -4</span><span>色温 -8</span></div>
+              <div class="strength"><button>25%</button><button class="active">50%</button><button>100%</button><button>125%</button><button>150%</button><input type="range" value="50" /></div>
+            </section>
+
+            <section class="panel refine-panel">
+              <div class="panel-head"><div><p class="label">AI 精修</p><h2>自然语言继续调色</h2></div></div>
+              <div class="prompt-row"><input value="再冷一点，但保留肤色" /><button>生成建议</button></div>
+              <p class="subhead">建议变更</p>
+              <div class="change-grid three">
+                <span>色温 <b>-8</b></span><span>色调 <b>+3</b></span><span>饱和度 <b>-4</b></span>
+              </div>
+              <div class="button-row"><button>预览建议</button><button class="primary">应用</button><button>撤回上一轮</button></div>
+            </section>
+
+            <section class="panel adjust-panel">
+              <div class="panel-head"><div><p class="label">手动调整</p><h2>调色参数</h2></div><span>收起</span></div>
+              <div class="sliders">
+                <label>曝光 <input type="range" value="52" /><b>0.00</b></label>
+                <label>对比度 <input type="range" value="60" /><b>+10</b></label>
+                <label>高光 <input type="range" value="42" /><b>-20</b></label>
+                <label>阴影 <input type="range" value="58" /><b>+15</b></label>
+                <label>色温 <input type="range" value="38" /><b>-8</b></label>
+                <label>色调 <input type="range" value="54" /><b>+3</b></label>
+                <label>自然饱和度 <input type="range" value="45" /><b>-4</b></label>
+                <label>饱和度 <input type="range" value="51" /><b>+2</b></label>
+              </div>
+              <div class="button-row"><button>撤销</button><button>重做</button><button>恢复 AI</button><button>恢复预设</button></div>
+            </section>
+
+            <section class="panel preset-panel">
+              <div class="panel-head"><div><p class="label">预设中心</p><h2>最近使用</h2></div><button class="ghost">更多</button></div>
+              <div class="presets"><img class="selected" src="./assets/preset-1.jpg" /><img src="./assets/preset-2.jpg" /><img src="./assets/preset-3.jpg" /><img src="./assets/preset-4.jpg" /></div>
+            </section>
+            <div class="export-row"><button>导出当前图</button><button class="primary">批量导出</button></div>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

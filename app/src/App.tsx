@@ -112,6 +112,14 @@ interface RefineTurn {
   instruction: string
   changes: AdjustmentValues
   rationale: string
+  before: AdjustmentValues
+  after: AdjustmentValues
+}
+
+interface PendingRefine {
+  instruction: string
+  result: RefineResult
+  preview: AdjustmentValues
 }
 
 // V3.0：带来源标签的撤销/重做条目（消除 AI 与手动混淆）
@@ -133,7 +141,7 @@ const AI_SOFT_TIMEOUT_MS = 8_000
 const BATCH_EXPORT_CONCURRENCY = 2
 
 interface LightboxState {
-  image: ImageAsset
+  image: Pick<ImageAsset, 'url' | 'width' | 'height'> & { revokeOnClose?: boolean }
   title: string
 }
 
@@ -260,11 +268,10 @@ function App() {
   const [refineInstruction, setRefineInstruction] = useState('')
   const [refineStatus, setRefineStatus] = useState<AnalysisStatus>('idle')
   const [refineError, setRefineError] = useState('')
+  const [pendingRefine, setPendingRefine] = useState<PendingRefine | null>(null)
+  const [refineFuture, setRefineFuture] = useState<RefineTurn[]>([])
   const refineSentImageRef = useRef<ImageAsset | null>(null)
   const refineControllerRef = useRef<AbortController | null>(null)
-  // 最近一次精修的结果参数（命名恢复锚点："恢复精修"）
-  const [lastRefineAdjustments, setLastRefineAdjustments] =
-    useState<AdjustmentValues | null>(null)
   // 按图片缓存精修结果（同一图、同一指令不再重复调用）
   const refineCacheRef = useRef<{ image: ImageAsset | null; map: Map<string, RefineResult> }>({
     image: null,
@@ -373,6 +380,8 @@ function App() {
   // V3.1：换实拍图 = 新对话，清空多轮精修的对话记录与待确认建议
   useEffect(() => {
     setRefineTurns([])
+    setRefineFuture([])
+    setPendingRefine(null)
     setRefineInstruction('')
     setRefineStatus('idle')
     setRefineError('')
@@ -634,7 +643,7 @@ function App() {
   const selectedBeforeItem =
     beforeQueue.find((item) => item.id === selectedBeforeId) ?? null
   const beforeExif = selectedBeforeItem?.exif ?? null
-  const selectedBeforeAsset = selectedBeforeItem?.asset ?? beforeImage
+  const selectedBeforeAsset = selectedBeforeItem?.asset ?? null
 
   const remember = (label: string, value = currentAdjustments) => {
     setHistoryPast((current) => [...current.slice(-49), { values: value, label }])
@@ -686,6 +695,24 @@ function App() {
       return
     }
 
+    setBatchImages((current) =>
+      current.map((item) =>
+        item.id === selectedImageId
+          ? { ...item, overrideAdjustments: next, adjustmentSource: source ?? undefined }
+          : item,
+      ),
+    )
+  }
+
+  const applyAdjustmentsToCurrentImage = (
+    next: AdjustmentValues,
+    source: AdjustmentSource | null,
+  ) => {
+    if (!selectedImageId) {
+      setGlobalAdjustments(next)
+      setGlobalAdjustmentSource(source)
+      return
+    }
     setBatchImages((current) =>
       current.map((item) =>
         item.id === selectedImageId
@@ -1286,22 +1313,52 @@ function App() {
   const addRefineDelta = (base: AdjustmentValues, changes: AdjustmentValues) =>
     mapAdjustments(base, (value, key) => value + changes[key])
 
-  // V3.1 #5：精简成「说一句 → 直接生效」。生成的增量立即应用并记入对话；
-  // 回退交给下方手动调整里的「撤销 / 重做」（applyAdjustmentsToScope 已把每步记入历史）。
-  const applyRefineResult = (instruction: string, result: RefineResult) => {
+  const setRefineSuggestion = (instruction: string, result: RefineResult) => {
+    const preview = addRefineDelta(currentAdjustments, result.changes)
+    setPendingRefine({ instruction, result, preview })
+    setRefineStatus('success')
+    setRefineError('')
+    setPresetMessage('AI 精修建议已生成，请确认参数后再应用。')
+  }
+
+  const applyPendingRefine = () => {
+    if (!pendingRefine) return
+    const before = currentAdjustments
+    const { instruction, result } = pendingRefine
     const applied = addRefineDelta(currentAdjustments, result.changes)
-    applyAdjustmentsToScope(applied, { source: 'ai', label: 'AI 精修' })
-    setLastRefineAdjustments(applied)
+    applyAdjustmentsToCurrentImage(applied, 'ai')
     setActivePresetId(null)
     setPresetModified(false)
     setRefineTurns((prev) => [
       ...prev,
-      { instruction, changes: result.changes, rationale: result.rationale },
+      { instruction, changes: result.changes, rationale: result.rationale, before, after: applied },
     ])
+    setRefineFuture([])
+    setPendingRefine(null)
     setRefineInstruction('')
     setRefineStatus('success')
     setRefineError('')
-    setPresetMessage('已应用 AI 精修，可继续说下一句；撤销 / 重做可回退。')
+    setPresetMessage('已应用 AI 精修，可在精修面板单独撤回或重做。')
+  }
+
+  const undoRefine = () => {
+    const last = refineTurns.at(-1)
+    if (!last) return
+    setRefineTurns((current) => current.slice(0, -1))
+    setRefineFuture((current) => [last, ...current].slice(0, 20))
+    setPendingRefine(null)
+    applyAdjustmentsToCurrentImage(last.before, getManualSource(currentAdjustmentSource))
+    setPresetMessage('已撤回上一轮 AI 精修。')
+  }
+
+  const redoRefine = () => {
+    const next = refineFuture[0]
+    if (!next) return
+    setRefineFuture((current) => current.slice(1))
+    setRefineTurns((current) => [...current, next])
+    setPendingRefine(null)
+    applyAdjustmentsToCurrentImage(next.after, 'ai')
+    setPresetMessage('已重做上一轮 AI 精修。')
   }
 
   const generateRefine = async () => {
@@ -1317,7 +1374,7 @@ function App() {
     const cacheKey = `${refineTurns.length}::${instruction}`
     const cached = refineCacheRef.current.map.get(cacheKey)
     if (cached) {
-      applyRefineResult(instruction, cached)
+      setRefineSuggestion(instruction, cached)
       return
     }
     setRefineStatus('loading')
@@ -1343,7 +1400,7 @@ function App() {
       )
       if (sendImage) refineSentImageRef.current = userImage
       refineCacheRef.current.map.set(cacheKey, result)
-      applyRefineResult(instruction, result)
+      setRefineSuggestion(instruction, result)
     } catch (error) {
       setRefineStatus('error')
       setRefineError(normalizeAnalysisError(error).message)
@@ -1352,15 +1409,8 @@ function App() {
     }
   }
 
-  // 命名恢复锚点："恢复到上次 AI 精修结果"
-  const restoreRefine = () => {
-    if (!lastRefineAdjustments) return
-    applyAdjustmentsToScope(lastRefineAdjustments, { source: 'ai', label: '恢复精修' })
-    setPresetMessage('已恢复到上次 AI 精修结果。')
-  }
-
   const runBeforeAnalysis = async () => {
-    if (!beforeImage) {
+    if (!selectedBeforeAsset) {
       setBeforeStatus('error')
       setBeforeError('请先上传参考照片。')
       return
@@ -1379,7 +1429,7 @@ function App() {
     beforeAnalysisControllerRef.current = controller
 
     try {
-      const result = await analyzeBeforeShoot(beforeImage, selectedModel, controller.signal)
+      const result = await analyzeBeforeShoot(selectedBeforeAsset, selectedModel, controller.signal)
       setBeforeResult(result)
       setBeforeStatus('success')
     } catch (error) {
@@ -1410,7 +1460,7 @@ function App() {
             <Aperture size={19} strokeWidth={2.2} />
           </span>
           <span>Shotai</span>
-          <span className="version-tag">V3.1</span>
+          <span className="version-tag">V3.2</span>
         </div>
         <nav className="global-nav" aria-label="全局导航">
           <button type="button" className={activeTab === 'before' ? 'active' : ''} onClick={() => setActiveTab('before')}>
@@ -1473,67 +1523,85 @@ function App() {
 
             <div className="before-grid">
               <div className="before-left">
-                <div className="ref-queue-head">
-                  <span className="panel-kicker">参考图队列</span>
-                  <small>可上传多张 · 分析以选中的单张为主</small>
-                </div>
-                <div className="ref-queue">
-                  {beforeQueue.map((item, index) => (
+                <section className="before-reference-panel">
+                  <div className="ref-queue-head">
+                    <span className="panel-kicker">参考图素材</span>
+                    <small>选中图片会显示在下方主预览 · 可继续添加</small>
+                  </div>
+                  <div className="before-reference-strip">
+                    <div className="ref-queue-block">
+                      <div className="ref-queue-title">
+                        <span>参考队列</span>
+                        <small>({beforeQueue.length})</small>
+                      </div>
+                      <div className="ref-queue">
+                        {beforeQueue.length ? (
+                          beforeQueue.map((item, index) => (
+                            <button
+                              type="button"
+                              key={item.id}
+                              className={`ref-thumb${item.id === selectedBeforeId ? ' selected' : ''}`}
+                              onClick={() => selectBeforeRef(item.id)}
+                              title={`选择参考 ${index + 1}`}
+                            >
+                              <img src={item.asset.url} alt={`参考 ${index + 1}`} />
+                            </button>
+                          ))
+                        ) : (
+                          <div className="ref-thumb-placeholder">
+                            上传后显示参考队列
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="ref-add-tile">
+                      <ImageUploader
+                        compact
+                        label="添加更多"
+                        description="上传参考图"
+                        image={null}
+                        onPreview={(image) => setLightbox({ image, title: '参考照片' })}
+                        onImageChange={(next) => {
+                          if (next) void addBeforeRef(next)
+                        }}
+                      />
+                    </div>
+                  </div>
+                </section>
+                <section className="before-preview-panel">
+                  <div className="ref-queue-head">
+                    <span className="panel-kicker">主预览</span>
+                    <small>{selectedBeforeAsset ? '当前选中的参考图' : '等待上传参考照片'}</small>
+                  </div>
+                  {selectedBeforeAsset ? (
                     <button
                       type="button"
-                      key={item.id}
-                      className={`ref-thumb${item.id === selectedBeforeId ? ' selected' : ''}`}
-                      onClick={() => selectBeforeRef(item.id)}
-                      title={`选择参考 ${index + 1}`}
+                      className="before-preview"
+                      onClick={() =>
+                        setLightbox({ image: selectedBeforeAsset, title: '参考照片' })
+                      }
                     >
-                      <img src={item.asset.url} alt={`参考 ${index + 1}`} />
-                      <span className="ref-cap">
-                        参考 {index + 1}
-                        {item.id === selectedBeforeId ? ' · 当前分析图' : ''}
-                      </span>
+                      <img src={selectedBeforeAsset.url} alt="选中的参考图" />
                     </button>
-                  ))}
-                  <div className="ref-add">
-                    <ImageUploader
-                      compact
-                      label="上传参考照片"
-                      description="可添加多张参考图"
-                      image={null}
-                      onPreview={(image) => setLightbox({ image, title: '参考照片' })}
-                      onImageChange={(next) => {
-                        if (next) void addBeforeRef(next)
-                      }}
-                    />
-                  </div>
-                </div>
-                {selectedBeforeAsset ? (
-                  <button
-                    type="button"
-                    className="before-preview"
-                    onClick={() =>
-                      setLightbox({ image: selectedBeforeAsset, title: '参考照片' })
-                    }
-                  >
-                    <img src={selectedBeforeAsset.url} alt="选中的参考图" />
-                  </button>
-                ) : (
-                  <div className="before-preview empty">
-                    上传参考照片后在此预览
-                  </div>
-                )}
-                {beforeExif && (
-                  <div className="exif-strip">
-                    <span className="exif-lead">📷 自带属性</span>
-                    {exifEntries(beforeExif).map((entry) => (
-                      <span className="exif-chip" key={entry}>
-                        {entry}
-                      </span>
-                    ))}
-                  </div>
-                )}
+                  ) : (
+                    <div className="before-preview empty">
+                      上传参考照片后在此预览
+                    </div>
+                  )}
+                  {beforeExif && (
+                    <div className="exif-strip">
+                      <span className="exif-lead">📷 自带属性</span>
+                      {exifEntries(beforeExif).map((entry) => (
+                        <span className="exif-chip" key={entry}>
+                          {entry}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </section>
               </div>
               <BeforeAnalysisPanel
-                imageReady={!!beforeImage}
+                imageReady={!!selectedBeforeAsset}
                 privacyAccepted={beforePrivacyAccepted}
                 onPrivacyChange={setBeforePrivacyAccepted}
                 status={beforeStatus}
@@ -1549,10 +1617,10 @@ function App() {
             </div>
           </section>
         ) : (
-          <section className="v2-workbench">
+          <section className="v2-workbench prototype-aligned-workbench">
             <div className="workbench-main">
               <div className="material-section">
-                <div className="reference-strip">
+                <div className="reference-strip merged-after-materials">
                   <ImageUploader
                     compact
                     label="目标风格照"
@@ -1564,74 +1632,52 @@ function App() {
                       clearColorAnalysis()
                     }}
                   />
-                  <div className="current-card">
-                    <span className="panel-kicker">当前实拍</span>
-                    {userImage ? (
-                      <button
-                        type="button"
-                        className="current-preview"
-                        onClick={() => setLightbox({ image: userImage, title: '当前实拍照' })}
-                      >
-                        <img src={userImage.url} alt="当前实拍照" />
-                        <span>
-                          <strong>{userImage.file.name}</strong>
-                          <small>
-                            {userImage.width} x {userImage.height}
-                            {currentAdjustmentSource ? ` · ${sourceLabel(currentAdjustmentSource)}` : ''}
-                          </small>
-                        </span>
-                      </button>
-                    ) : (
-                      <div className="current-empty">
-                        <ImageIcon size={22} />
-                        <span>从图片队列选择一张实拍照</span>
-                      </div>
-                    )}
+                  <div className="compact-queue-shell">
+                    <BatchImageQueue
+                      items={batchImages}
+                      selectedId={selectedImageId}
+                      exporting={batchExporting}
+                      filter={batchFilter}
+                      exportQuality={exportQuality}
+                      exportMaxEdge={exportMaxEdge}
+                      onFilterChange={setBatchFilter}
+                      onExportQualityChange={setExportQuality}
+                      onExportMaxEdgeChange={setExportMaxEdge}
+                      onAdd={addBatchImages}
+                      onSelect={(id) => {
+                        setSelectedImageId(id)
+                        clearColorAnalysis()
+                      }}
+                      onToggleSelect={(id) =>
+                        setBatchImages((current) =>
+                          current.map((item) =>
+                            item.id === id ? { ...item, selected: !item.selected } : item,
+                          ),
+                        )
+                      }
+                      onSelectAll={() =>
+                        setBatchImages((current) =>
+                          current.map((item) => ({ ...item, selected: true })),
+                        )
+                      }
+                      onClearSelection={() =>
+                        setBatchImages((current) =>
+                          current.map((item) => ({ ...item, selected: false })),
+                        )
+                      }
+                      onRemove={removeBatchImage}
+                      onClear={clearBatchImages}
+                      onExportAll={() => exportBatch('all')}
+                      onExportSelected={() => exportBatch('selected')}
+                      onExportSuccessful={() => exportBatch('successful')}
+                      onCancelExport={cancelBatchExport}
+                      onRetryFailed={() => exportBatch('failed')}
+                      exportMessage={batchExportMessage}
+                      onPreview={(asset) => setLightbox({ image: asset, title: asset.file.name })}
+                      variant="strip"
+                    />
                   </div>
                 </div>
-
-                <BatchImageQueue
-                  items={batchImages}
-                  selectedId={selectedImageId}
-                  exporting={batchExporting}
-                  filter={batchFilter}
-                  exportQuality={exportQuality}
-                  exportMaxEdge={exportMaxEdge}
-                  onFilterChange={setBatchFilter}
-                  onExportQualityChange={setExportQuality}
-                  onExportMaxEdgeChange={setExportMaxEdge}
-                  onAdd={addBatchImages}
-                  onSelect={(id) => {
-                    setSelectedImageId(id)
-                    clearColorAnalysis()
-                  }}
-                  onToggleSelect={(id) =>
-                    setBatchImages((current) =>
-                      current.map((item) =>
-                        item.id === id ? { ...item, selected: !item.selected } : item,
-                      ),
-                    )
-                  }
-                  onSelectAll={() =>
-                    setBatchImages((current) =>
-                      current.map((item) => ({ ...item, selected: true })),
-                    )
-                  }
-                  onClearSelection={() =>
-                    setBatchImages((current) =>
-                      current.map((item) => ({ ...item, selected: false })),
-                    )
-                  }
-                  onRemove={removeBatchImage}
-                  onClear={clearBatchImages}
-                  onExportAll={() => exportBatch('all')}
-                  onExportSelected={() => exportBatch('selected')}
-                  onExportSuccessful={() => exportBatch('successful')}
-                  onCancelExport={cancelBatchExport}
-                  onRetryFailed={() => exportBatch('failed')}
-                  exportMessage={batchExportMessage}
-                  onPreview={(asset) => setLightbox({ image: asset, title: asset.file.name })}
-                />
               </div>
 
               <CanvasPreview
@@ -1650,7 +1696,7 @@ function App() {
               />
             </div>
 
-            <aside className="control-column v2-controls">
+            <aside className="control-column v2-controls prototype-controls">
               <section className="performance-panel">
                 <button
                   type="button"
@@ -1894,7 +1940,47 @@ function App() {
                       ? '处理中…'
                       : refineTurns.length
                         ? '继续'
-                        : '生成并应用'}
+                        : '生成建议'}
+                  </button>
+                </div>
+                {pendingRefine && (
+                  <div className="ai-refine-pending">
+                    <div>
+                      <span className="panel-kicker">待确认建议</span>
+                      <p className="refine-turn-instruction">{pendingRefine.instruction}</p>
+                    </div>
+                    <div className="ai-refine-changes">
+                      {Object.entries(pendingRefine.result.changes)
+                        .filter(([, value]) => value !== 0)
+                        .map(([key, value]) => (
+                          <span key={key} className="ai-refine-chip">
+                            {ADJUSTMENT_LABELS[key as AdjustmentKey]}{' '}
+                            {formatAdjustmentValue(value)}
+                          </span>
+                        ))}
+                      {Object.values(pendingRefine.result.changes).every((value) => value === 0) && (
+                        <span className="ai-refine-chip muted">无明显变化</span>
+                      )}
+                    </div>
+                    {pendingRefine.result.rationale && (
+                      <p className="ai-refine-rationale">{pendingRefine.result.rationale}</p>
+                    )}
+                    <div className="ai-refine-actions">
+                      <button type="button" className="primary-inline" onClick={applyPendingRefine}>
+                        应用建议
+                      </button>
+                      <button type="button" className="secondary-button" onClick={() => setPendingRefine(null)}>
+                        暂不应用
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <div className="ai-refine-actions">
+                  <button type="button" className="secondary-button" onClick={undoRefine} disabled={!refineTurns.length}>
+                    撤回精修
+                  </button>
+                  <button type="button" className="secondary-button" onClick={redoRefine} disabled={!refineFuture.length}>
+                    重做精修
                   </button>
                 </div>
                 {!userImage && (
@@ -1932,8 +2018,6 @@ function App() {
                 onResetAll={resetAdjustments}
                 onRestoreAi={() => aiAnalysis && applyAdjustmentsToScope(aiAnalysis.adjustments, { source: 'ai' })}
                 onRestorePreset={() => activePresetValues && applyAdjustmentsToScope(activePresetValues, { source: 'preset' })}
-                refineValues={lastRefineAdjustments}
-                onRestoreRefine={restoreRefine}
                 undoLabel={historyPast.at(-1)?.label}
                 redoLabel={historyFuture[0]?.label}
                 onUndo={undoAdjustments}
@@ -1960,7 +2044,10 @@ function App() {
       {lightbox && (
         <ImageLightbox
           state={lightbox}
-          onClose={() => setLightbox(null)}
+          onClose={() => {
+            if (lightbox.image.revokeOnClose) URL.revokeObjectURL(lightbox.image.url)
+            setLightbox(null)
+          }}
         />
       )}
     </div>
@@ -2458,13 +2545,6 @@ function describeAdjustmentSource(source: AdjustmentSource | null): string {
 
 function getManualSource(source: AdjustmentSource | null): AdjustmentSource {
   return source === 'ai' || source === 'mixed' ? 'mixed' : 'manual'
-}
-
-function sourceLabel(source: AdjustmentSource) {
-  if (source === 'ai') return 'AI'
-  if (source === 'preset') return '预设'
-  if (source === 'mixed') return 'AI+手动'
-  return '手动'
 }
 
 function exportQualityLabel(quality: ExportQuality) {

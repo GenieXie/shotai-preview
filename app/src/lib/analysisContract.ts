@@ -127,13 +127,20 @@ export function normalizeBeforeAnalysis(value: unknown): BeforeAnalysisResult {
 function normalizeVisualDimensions(value: unknown): BeforeVisualDimensions {
   const record =
     value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+  const textOf = (...keys: string[]) => {
+    for (const key of keys) {
+      const normalized = normalizeText(record[key], '')
+      if (normalized) return normalized
+    }
+    return '—'
+  }
   return {
-    colorTendency: normalizeText(record.colorTendency, '—'),
-    lightDirection: normalizeText(record.lightDirection, '—'),
-    contrast: normalizeText(record.contrast, '—'),
-    tone: normalizeText(record.tone, '—'),
-    temperature: normalizeText(record.temperature, '—'),
-    saturation: normalizeText(record.saturation, '—'),
+    colorTendency: textOf('colorTendency', 'color_tendency', '色彩倾向'),
+    lightDirection: textOf('lightDirection', 'light_direction', '光线方向'),
+    contrast: textOf('contrast', '对比度'),
+    tone: textOf('tone', '影调'),
+    temperature: textOf('temperature', '色温'),
+    saturation: textOf('saturation', '饱和度'),
   }
 }
 

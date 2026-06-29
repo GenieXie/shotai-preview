@@ -51,7 +51,7 @@ interface CanvasPreviewProps {
   exportQuality?: ExportQuality
   exportMaxEdge?: number
   onModeChange: (mode: PreviewMode) => void
-  onPreview?: (image: ImageAsset) => void
+  onPreview?: (image: Pick<ImageAsset, 'url' | 'width' | 'height'> & { revokeOnClose?: boolean }) => void
   onRenderStatusChange?: (status: PreviewRenderStatus) => void
   onRisksChange?: (risks: PreviewRisk[]) => void
   onRenderMetric?: (metric: {
@@ -238,6 +238,20 @@ export function CanvasPreview({
     }
   }
 
+  const previewAdjustedImage = () => {
+    const canvas = canvasRef.current
+    if (!image || !canvas || status !== 'ready') return
+    canvas.toBlob((blob) => {
+      if (!blob) return
+      onPreview?.({
+        url: URL.createObjectURL(blob),
+        width: canvas.width,
+        height: canvas.height,
+        revokeOnClose: true,
+      })
+    }, 'image/png')
+  }
+
   const updateSplit = (event: PointerEvent<HTMLDivElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect()
     const next = ((event.clientX - bounds.left) / bounds.width) * 100
@@ -259,8 +273,8 @@ export function CanvasPreview({
           <button
             type="button"
             className="secondary-button icon-text"
-            onClick={() => image && onPreview?.(image)}
-            disabled={!image}
+            onClick={previewAdjustedImage}
+            disabled={!image || status !== 'ready'}
           >
             <Eye size={15} />
             查看

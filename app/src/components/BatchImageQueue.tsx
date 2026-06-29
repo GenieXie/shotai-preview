@@ -67,6 +67,7 @@ interface BatchImageQueueProps {
   onCancelExport: () => void
   onRetryFailed: () => void
   onPreview: (asset: ImageAsset) => void
+  variant?: 'full' | 'strip'
 }
 
 export function BatchImageQueue({
@@ -93,6 +94,7 @@ export function BatchImageQueue({
   onCancelExport,
   onRetryFailed,
   onPreview,
+  variant = 'full',
 }: BatchImageQueueProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [message, setMessage] = useState('')
@@ -309,15 +311,17 @@ export function BatchImageQueue({
                 aria-label={`预览 ${item.asset.file.name}`}
               >
                 <img src={item.asset.url} alt="" />
-                <span>
-                  <strong>{item.asset.file.name}</strong>
-                  <small>
-                    {item.asset.width} x {item.asset.height}
-                    {item.adjustmentSource ? ` · ${sourceLabel(item.adjustmentSource)}` : ''}
-                    {item.asset.warnings.length ? ' · 有提示' : ''}
-                  </small>
-                  <StatusTags item={item} />
-                </span>
+                {variant === 'full' && (
+                  <span>
+                    <strong>{item.asset.file.name}</strong>
+                    <small>
+                      {item.asset.width} x {item.asset.height}
+                      {item.adjustmentSource ? ` · ${sourceLabel(item.adjustmentSource)}` : ''}
+                      {item.asset.warnings.length ? ' · 有提示' : ''}
+                    </small>
+                    <StatusTags item={item} />
+                  </span>
+                )}
               </button>
               <button
                 type="button"
