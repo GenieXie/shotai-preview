@@ -909,24 +909,7 @@ function extractGeminiText(payload) {
 
 function normalizeAnalysis(value) {
   const adjustments = value?.adjustments || {}
-  const normalizedAdjustments = normalizeAiAdjustmentsForSafety({
-    exposure: normalizeAdjustment(adjustments.exposure),
-    brightness: normalizeAdjustment(adjustments.brightness),
-    contrast: normalizeAdjustment(adjustments.contrast),
-    highlights: normalizeAdjustment(adjustments.highlights),
-    shadows: normalizeAdjustment(adjustments.shadows),
-    whites: normalizeAdjustment(adjustments.whites),
-    blacks: normalizeAdjustment(adjustments.blacks),
-    saturation: normalizeAdjustment(adjustments.saturation),
-    vibrance: normalizeAdjustment(adjustments.vibrance),
-    temperature: normalizeAdjustment(adjustments.temperature),
-    tint: normalizeAdjustment(adjustments.tint),
-    clarity: normalizeAdjustment(adjustments.clarity),
-    dehaze: normalizeAdjustment(adjustments.dehaze),
-    sharpness: normalizeAdjustment(adjustments.sharpness),
-    grain: normalizeAdjustment(adjustments.grain),
-    vignette: normalizeAdjustment(adjustments.vignette),
-  })
+  const normalizedAdjustments = normalizeAiAdjustments(adjustments)
   return {
     styleSummary: normalizeText(
       value?.styleSummary || value?.explanation,
@@ -973,50 +956,10 @@ function normalizeAdjustment(value) {
   return Math.max(-100, Math.min(100, Math.round(value)))
 }
 
-function normalizeAiAdjustmentsForSafety(adjustments) {
-  const safe = {
-    exposure: Math.round(adjustments.exposure * 0.5),
-    brightness: Math.round(adjustments.brightness * 0.5),
-    contrast: Math.round(adjustments.contrast * 0.5),
-    highlights: Math.round(adjustments.highlights * 0.5),
-    shadows: Math.round(adjustments.shadows * 0.5),
-    whites: Math.round(adjustments.whites * 0.5),
-    blacks: Math.round(adjustments.blacks * 0.5),
-    saturation: Math.round(adjustments.saturation * 0.5),
-    vibrance: Math.round(adjustments.vibrance * 0.5),
-    temperature: Math.round(adjustments.temperature * 0.5),
-    tint: Math.round(adjustments.tint * 0.5),
-    clarity: Math.round(adjustments.clarity * 0.5),
-    dehaze: Math.round(adjustments.dehaze * 0.5),
-    sharpness: Math.round(adjustments.sharpness * 0.5),
-    grain: Math.round(adjustments.grain * 0.5),
-    vignette: Math.round(adjustments.vignette * 0.5),
-  }
-
-  safe.exposure = Math.min(safe.exposure, 18)
-  safe.brightness = Math.min(safe.brightness, 20)
-  safe.highlights = Math.min(safe.highlights, 15)
-  safe.whites = Math.min(safe.whites, 12)
-  safe.contrast = Math.min(safe.contrast, 25)
-  safe.saturation = Math.min(safe.saturation, 25)
-  safe.vibrance = Math.min(safe.vibrance, 25)
-  safe.clarity = Math.min(safe.clarity, 20)
-  safe.dehaze = Math.min(safe.dehaze, 20)
-  safe.sharpness = Math.min(safe.sharpness, 20)
-
-  const positiveHighlightDrivers = [
-    safe.exposure,
-    safe.brightness,
-    safe.highlights,
-    safe.whites,
-  ].filter((amount) => amount > 0).length
-
-  if (positiveHighlightDrivers >= 2) {
-    safe.highlights = Math.min(safe.highlights, Math.round(safe.highlights * 0.5))
-    safe.whites = Math.min(safe.whites, Math.round(safe.whites * 0.5))
-  }
-
-  return safe
+function normalizeAiAdjustments(adjustments) {
+  const normalized = {}
+  for (const key of ADJUSTMENT_KEYS) normalized[key] = normalizeAdjustment(adjustments[key])
+  return normalized
 }
 
 function sendJson(response, status, payload) {

@@ -9,6 +9,8 @@ Shotai V3.2 — prototype-aligned post-shoot workbench review build:
   right-side controls.
 - Keeps the V3.1 AI model fallback and multi-round AI refine behavior intact
   while reshaping the review surface for faster visual inspection.
+- Removes the legacy server-side V2.1 halve-then-cap adjustment softening so
+  V3.0 front-end safety scaling is the single AI color safety layer.
 - Adds local prototype assets under `prototypes/shotai-v3` for side-by-side
   design review.
 
